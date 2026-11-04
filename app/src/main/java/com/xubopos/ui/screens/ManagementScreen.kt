@@ -511,31 +511,35 @@ private fun MenuManagementTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Amber50,
+                            modifier = Modifier.padding(bottom = 3.dp)
                         ) {
                             Text(
-                                text = product.name,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 15.sp,
-                                color = Slate900
+                                text = categoryName,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Amber700,
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                             )
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Amber50
-                            ) {
-                                Text(
-                                    text = categoryName,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Amber700,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
                         }
+                        Text(
+                            text = product.name,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 15.sp,
+                            color = Slate900,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         if (product.description.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = product.description,
                                 fontSize = 12.sp,
@@ -1462,22 +1466,15 @@ private fun RestaurantSettingsTab(
                                 )
                             }
                         }
-                        Column {
-                            Text(
-                                text = "İşletme & Restoran Kimliği",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Slate900
-                            )
-                            Text(
-                                text = "Ana ekranda ve raporlarda görünen işletme adını belirleyin",
-                                fontSize = 12.sp,
-                                color = Slate500
-                            )
-                        }
+                        Text(
+                            text = "İşletme Adı",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate900
+                        )
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     OutlinedTextField(
                         value = nameInput,
@@ -1489,27 +1486,7 @@ private fun RestaurantSettingsTab(
                         shape = RoundedCornerShape(12.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Text(
-                        text = "Hızlı Seçenekler / Öneriler:",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Slate700
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val presets = listOf("Maya&Masa", "Xubopos", "Xubopos Cafe", "Adisyon POS")
-                        items(presets) { preset ->
-                            FilterChip(
-                                selected = nameInput == preset,
-                                onClick = { nameInput = preset },
-                                label = { Text(preset, fontSize = 11.sp) }
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
 
                     Button(
                         onClick = {

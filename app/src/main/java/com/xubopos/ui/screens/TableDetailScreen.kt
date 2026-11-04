@@ -265,6 +265,7 @@ fun TableDetailScreen(
                         onSelectCategory = viewModel::selectCategory,
                         onSearchChange = viewModel::updateSearchQuery,
                         onAddMenuItem = { viewModel.addItemToCurrentTable(it) },
+                        onDecrementMenuItem = { viewModel.decrementItem(it) },
                         modifier = Modifier
                             .weight(1.35f)
                             .fillMaxHeight()
@@ -280,17 +281,6 @@ fun TableDetailScreen(
                         onEditNote = { editingNoteItem = it },
                         onOpenPayment = { showPaymentDialog = true },
                         onSendKitchen = { viewModel.sendOrderToKitchen(currentTable.id) },
-                        onQuickPayAll = { method ->
-                            if (remainingAmount > 0) {
-                                viewModel.makePayment(
-                                    amount = remainingAmount,
-                                    method = method,
-                                    note = "Hızlı Kapama",
-                                    closeTableIfPaid = true,
-                                    onTableClosed = onBack
-                                )
-                            }
-                        },
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
@@ -370,6 +360,7 @@ fun TableDetailScreen(
                                 onSelectCategory = viewModel::selectCategory,
                                 onSearchChange = viewModel::updateSearchQuery,
                                 onAddMenuItem = { viewModel.addItemToCurrentTable(it) },
+                                onDecrementMenuItem = { viewModel.decrementItem(it) },
                                 modifier = Modifier.weight(1f)
                             )
 
@@ -422,11 +413,23 @@ fun TableDetailScreen(
 
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Button(
-                                                onClick = { showPaymentDialog = true },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                                                onClick = { viewModel.sendOrderToKitchen(currentTable.id) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Amber600),
                                                 shape = RoundedCornerShape(12.dp)
                                             ) {
-                                                Text("Ödeme Al", fontWeight = FontWeight.Bold)
+                                                Icon(
+                                                    imageVector = Icons.Default.Restaurant,
+                                                    contentDescription = null,
+                                                    tint = PureWhite,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "Siparişi Gönder (KDS)",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = PureWhite
+                                                )
                                             }
                                         }
                                     }
@@ -445,17 +448,6 @@ fun TableDetailScreen(
                             onEditNote = { editingNoteItem = it },
                             onOpenPayment = { showPaymentDialog = true },
                             onSendKitchen = { viewModel.sendOrderToKitchen(currentTable.id) },
-                            onQuickPayAll = { method ->
-                                if (remainingAmount > 0) {
-                                    viewModel.makePayment(
-                                        amount = remainingAmount,
-                                        method = method,
-                                        note = "Hızlı Kapama",
-                                        closeTableIfPaid = true,
-                                        onTableClosed = onBack
-                                    )
-                                }
-                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -592,6 +584,7 @@ private fun MenuCatalogSection(
     onSelectCategory: (Int) -> Unit,
     onSearchChange: (String) -> Unit,
     onAddMenuItem: (MenuItem) -> Unit,
+    onDecrementMenuItem: (OrderItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val itemCountMap = remember(orderItems) {
@@ -762,18 +755,68 @@ private fun MenuCatalogSection(
                                 fontSize = 15.sp,
                                 color = Amber700
                             )
-                            Surface(
-                                shape = CircleShape,
-                                color = Slate100,
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Ekle",
-                                        tint = Slate800,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                            if (inBillCount > 0) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Rose50,
+                                        border = BorderStroke(1.dp, Rose100),
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .clickable {
+                                                val item = orderItems.findLast { it.menuItemId == product.id }
+                                                if (item != null) onDecrementMenuItem(item)
+                                            }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.Remove,
+                                                contentDescription = "Azalt",
+                                                tint = Rose600,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Amber500,
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .clickable { onAddMenuItem(product) }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = "Ekle",
+                                                tint = PureWhite,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Slate100,
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .clickable { onAddMenuItem(product) }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Ekle",
+                                            tint = Slate800,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -795,7 +838,6 @@ private fun BillTicketSection(
     onDecrement: (OrderItem) -> Unit,
     onEditNote: (OrderItem) -> Unit,
     onOpenPayment: () -> Unit,
-    onQuickPayAll: (String) -> Unit,
     onSendKitchen: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -1291,16 +1333,19 @@ private fun BillTicketSection(
                     onClick = onSendKitchen,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .height(48.dp)
+                        .then(if (!isServer) Modifier.navigationBarsPadding() else Modifier),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Amber600)
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber600),
+                    enabled = orderItems.isNotEmpty()
                 ) {
-                    Icon(imageVector = Icons.Default.Restaurant, contentDescription = null)
+                    Icon(imageVector = Icons.Default.Restaurant, contentDescription = null, tint = PureWhite)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "MUTFAĞA GÖNDER (KDS)",
+                        text = "SİPARİŞİ GÖNDER (KDS)",
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 13.sp
+                        fontSize = 13.sp,
+                        color = PureWhite
                     )
                 }
 
@@ -1311,7 +1356,8 @@ private fun BillTicketSection(
                         onClick = onOpenPayment,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp),
+                            .height(50.dp)
+                            .navigationBarsPadding(),
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Slate900)
                     ) {
@@ -1322,61 +1368,6 @@ private fun BillTicketSection(
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 14.sp
                         )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { onQuickPayAll("NAKİT") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.5.dp, Emerald600)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Payments,
-                                contentDescription = null,
-                                tint = Emerald600,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Hızlı Nakit",
-                                fontWeight = FontWeight.Bold,
-                                color = Emerald700,
-                                fontSize = 12.sp
-                            )
-                        }
-
-                        OutlinedButton(
-                            onClick = { onQuickPayAll("KART") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.5.dp, Sky600)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CreditCard,
-                                contentDescription = null,
-                                tint = Sky600,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Hızlı Kart",
-                                fontWeight = FontWeight.Bold,
-                                color = Sky700,
-                                fontSize = 12.sp
-                            )
-                        }
                     }
                 }
             }

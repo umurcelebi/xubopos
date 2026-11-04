@@ -447,7 +447,9 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     fun sendOrderToKitchen(tableId: Int) {
         val table = allTables.value.find { it.id == tableId } ?: return
         viewModelScope.launch {
-            val items = repository.getOrderItemsForBill(table.currentBillId ?: 0L).firstOrNull() ?: emptyList()
+            val items = currentOrderItems.value.ifEmpty {
+                repository.getOrderItemsForBill(table.currentBillId ?: 0L).firstOrNull() ?: emptyList()
+            }
             if (items.isNotEmpty()) {
                 val dtoList = items.map {
                     KitchenTicketItemDto(
@@ -458,12 +460,22 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                         note = it.note
                     )
                 }
-                repository.createKitchenTicket(
-                    tableId = table.id,
-                    tableName = table.name,
-                    waiterName = "Kasa",
-                    items = dtoList
-                )
+                if (_deviceRole.value == DeviceRole.SERVER) {
+                    repository.createKitchenTicket(
+                        tableId = table.id,
+                        tableName = table.name,
+                        waiterName = "Kasa",
+                        items = dtoList
+                    )
+                } else {
+                    val payload = AddOrderPayload(
+                        tableId = table.id,
+                        tableName = table.name,
+                        waiterName = "Garson",
+                        items = dtoList
+                    )
+                    client?.sendAddOrder(payload)
+                }
                 _snackbarMessage.value = "${table.name} siparişi mutfak ekranına iletildi!"
             }
         }

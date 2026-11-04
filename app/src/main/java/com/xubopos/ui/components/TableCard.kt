@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -45,9 +46,11 @@ import com.xubopos.ui.theme.Sky100
 import com.xubopos.ui.theme.Sky50
 import com.xubopos.ui.theme.Sky500
 import com.xubopos.ui.theme.Sky700
+import com.xubopos.ui.theme.Slate100
 import com.xubopos.ui.theme.Slate200
 import com.xubopos.ui.theme.Slate400
 import com.xubopos.ui.theme.Slate500
+import com.xubopos.ui.theme.Slate600
 import com.xubopos.ui.theme.Slate800
 import com.xubopos.ui.theme.Slate900
 
@@ -94,6 +97,7 @@ fun TableCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
+            .height(150.dp)
             .clip(RoundedCornerShape(18.dp))
             .clickable { onClick() },
         shape = RoundedCornerShape(18.dp),
@@ -103,104 +107,11 @@ fun TableCard(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
                 .padding(14.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(9.dp)
-                            .clip(CircleShape)
-                            .background(dotColor)
-                    )
-                    Text(
-                        text = table.zone,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Slate500,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = badgeBg
-                ) {
-                    Text(
-                        text = statusLabel,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = badgeText,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = table.name,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = Slate900,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            if (isOccupied) {
-                HorizontalDivider(color = borderColor.copy(alpha = 0.35f))
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Column {
-                        Text(
-                            text = if (isPartial) "Kalan Tutar" else "Toplam Hesap",
-                            fontSize = 10.sp,
-                            color = Slate500
-                        )
-                        Text(
-                            text = "₺${"%.2f".format(table.remainingAmount)}",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isPartial) Sky700 else Amber700
-                        )
-                    }
-                    table.occupiedSince?.let { since ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AccessTime,
-                                contentDescription = null,
-                                tint = Slate500,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = formatElapsedMinutes(since),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Slate500
-                            )
-                        }
-                    }
-                }
-            } else {
-                Spacer(modifier = Modifier.height(8.dp))
+            Column {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -208,26 +119,135 @@ fun TableCard(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.People,
-                            contentDescription = null,
-                            tint = Slate400,
-                            modifier = Modifier.size(14.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(9.dp)
+                                .clip(CircleShape)
+                                .background(dotColor)
                         )
                         Text(
-                            text = "${table.capacity} Kişilik",
-                            fontSize = 12.sp,
-                            color = Slate500
+                            text = table.zone,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Slate500,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Text(
-                        text = "Sipariş Aç →",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Amber600
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = badgeBg
+                    ) {
+                        Text(
+                            text = statusLabel,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeText,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = table.name,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Slate900,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Column {
+                HorizontalDivider(color = if (isOccupied) borderColor.copy(alpha = 0.35f) else Slate200)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (isOccupied) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Column {
+                            Text(
+                                text = if (isPartial) "Kalan Tutar" else "Toplam Hesap",
+                                fontSize = 10.sp,
+                                color = Slate500
+                            )
+                            Text(
+                                text = "₺${"%.2f".format(table.remainingAmount)}",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isPartial) Sky700 else Amber700
+                            )
+                        }
+                        table.occupiedSince?.let { since ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccessTime,
+                                    contentDescription = null,
+                                    tint = Slate500,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = formatElapsedMinutes(since),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Slate500
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Masa Durumu",
+                                fontSize = 10.sp,
+                                color = Slate400
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.People,
+                                    contentDescription = null,
+                                    tint = Slate400,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "${table.capacity} Kişilik",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Slate600
+                                )
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Slate100
+                        ) {
+                            Text(
+                                text = "Sipariş Aç →",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Amber600,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
