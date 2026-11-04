@@ -1,0 +1,698 @@
+package com.xubopos.ui.viewmodel
+
+import android.app.Application
+import android.content.Context
+import android.os.Build
+import android.util.Log
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.google.gson.Gson
+import com.xubopos.data.db.AppDatabase
+import com.xubopos.data.model.DailyReport
+import com.xubopos.data.model.DetailedSalesReport
+import com.xubopos.data.model.KitchenTicketEntity
+import com.xubopos.data.model.KitchenTicketItemDto
+import com.xubopos.data.model.MenuCategory
+import com.xubopos.data.model.MenuItem
+import com.xubopos.data.model.OrderBill
+import com.xubopos.data.model.OrderItem
+import com.xubopos.data.model.PaymentRecord
+import com.xubopos.data.model.ReportPeriod
+import com.xubopos.data.model.RestaurantTable
+import com.xubopos.data.repository.POSRepository
+import com.xubopos.network.AddOrderPayload
+import com.xubopos.network.ConnectionStatus
+import com.xubopos.network.DeviceRole
+import com.xubopos.network.FullSyncPayload
+import com.xubopos.network.LocalPosClient
+import com.xubopos.network.LocalPosServer
+import com.xubopos.network.NetworkPacket
+import com.xubopos.network.PosNsdHelper
+import java.net.URI
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+enum class AppScreen {
+    TABLES,
+    MANAGEMENT,
+    KITCHEN
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class POSViewModel(application: Application) : AndroidViewModel(application) {
+    private val repository: POSRepository
+    private val prefs = application.getSharedPreferences("xubopos_prefs", Context.MODE_PRIVATE)
+
+    private val _deviceRole = MutableStateFlow(
+        try {
+            DeviceRole.valueOf(prefs.getString("device_role", DeviceRole.SERVER.name) ?: DeviceRole.SERVER.name)
+        } catch (_: Exception) {
+            DeviceRole.SERVER
+        }
+    )
+    val deviceRole: StateFlow<DeviceRole> = _deviceRole.asStateFlow()
+
+    private val _connectionStatus = MutableStateFlow(ConnectionStatus.DISCONNECTED)
+    val connectionStatus: StateFlow<ConnectionStatus> = _connectionStatus.asStateFlow()
+
+    private val _connectedClientCount = MutableStateFlow(0)
+    val connectedClientCount: StateFlow<Int> = _connectedClientCount.asStateFlow()
+
+    private val _resolvedServerHost = MutableStateFlow<String?>(null)
+    val resolvedServerHost: StateFlow<String?> = _resolvedServerHost.asStateFlow()
+
+    private val _restaurantName = MutableStateFlow(
+        prefs.getString("restaurant_name", "Xubopos") ?: "Xubopos"
+    )
+    val restaurantName: StateFlow<String> = _restaurantName.asStateFlow()
+
+    private val _remoteTables = MutableStateFlow<List<RestaurantTable>>(emptyList())
+    private val _remoteCategories = MutableStateFlow<List<MenuCategory>>(emptyList())
+    private val _remoteMenuItems = MutableStateFlow<List<MenuItem>>(emptyList())
+    private val _remoteKitchenTickets = MutableStateFlow<List<KitchenTicketEntity>>(emptyList())
+    private val _remoteActiveItems = MutableStateFlow<List<OrderItem>>(emptyList())
+
+    val allTables: StateFlow<List<RestaurantTable>>
+    val allCategories: StateFlow<List<MenuCategory>>
+    val allMenuItems: StateFlow<List<MenuItem>>
+    val activeKitchenTickets: StateFlow<List<KitchenTicketEntity>>
+    val dailyReport: StateFlow<DailyReport>
+
+    private val _currentScreen = MutableStateFlow(
+        if (_deviceRole.value == DeviceRole.KITCHEN) AppScreen.KITCHEN else AppScreen.TABLES
+    )
+    val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
+
+    private val _selectedZone = MutableStateFlow("Tümü")
+    val selectedZone: StateFlow<String> = _selectedZone.asStateFlow()
+
+    private val _selectedTableId = MutableStateFlow<Int?>(null)
+    val selectedTableId: StateFlow<Int?> = _selectedTableId.asStateFlow()
+
+    private val _selectedCategoryId = MutableStateFlow(0)
+    val selectedCategoryId: StateFlow<Int> = _selectedCategoryId.asStateFlow()
+
+    private val _menuSearchQuery = MutableStateFlow("")
+    val menuSearchQuery: StateFlow<String> = _menuSearchQuery.asStateFlow()
+
+    private val _snackbarMessage = MutableStateFlow<String?>(null)
+    val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
+
+    private val _selectedReportPeriod = MutableStateFlow(ReportPeriod.TODAY)
+    val selectedReportPeriod: StateFlow<ReportPeriod> = _selectedReportPeriod.asStateFlow()
+
+    private val _detailedReport = MutableStateFlow(DetailedSalesReport())
+    val detailedReport: StateFlow<DetailedSalesReport> = _detailedReport.asStateFlow()
+
+    val selectedTable: StateFlow<RestaurantTable?>
+    val currentBill: StateFlow<OrderBill?>
+    val currentOrderItems: StateFlow<List<OrderItem>>
+    val currentPayments: StateFlow<List<PaymentRecord>>
+    val filteredMenuItems: StateFlow<List<MenuItem>>
+
+    private var server: LocalPosServer? = null
+    private var client: LocalPosClient? = null
+    private var nsdHelper: PosNsdHelper? = null
+
+    init {
+        val dao = AppDatabase.getDatabase(application).restaurantDao()
+        repository = POSRepository(dao)
+
+        allTables = combine(_deviceRole, repository.allTables, _remoteTables) { role, local, remote ->
+            if (role == DeviceRole.SERVER) local else remote
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        allCategories = combine(_deviceRole, repository.allCategories, _remoteCategories) { role, local, remote ->
+            if (role == DeviceRole.SERVER) local else remote
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        allMenuItems = combine(_deviceRole, repository.allMenuItems, _remoteMenuItems) { role, local, remote ->
+            if (role == DeviceRole.SERVER) local else remote
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        activeKitchenTickets = combine(_deviceRole, repository.activeKitchenTickets, _remoteKitchenTickets) { role, local, remote ->
+            if (role == DeviceRole.SERVER) local else remote
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        dailyReport = repository.getDailyReportFlow().stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            DailyReport()
+        )
+
+        selectedTable = combine(allTables, _selectedTableId) { tables, id ->
+            tables.find { it.id == id }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+        currentBill = selectedTable.flatMapLatest { table ->
+            val billId = table?.currentBillId
+            if (billId != null) {
+                if (_deviceRole.value == DeviceRole.SERVER) {
+                    repository.getBillFlow(billId)
+                } else {
+                    flowOf(
+                        OrderBill(
+                            id = billId,
+                            tableId = table.id,
+                            tableName = table.name,
+                            totalAmount = table.currentTotalAmount,
+                            paidAmount = table.currentPaidAmount
+                        )
+                    )
+                }
+            } else {
+                flowOf(null)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+        currentOrderItems = combine(selectedTable, _deviceRole, _remoteActiveItems) { table, role, remoteItems ->
+            val billId = table?.currentBillId
+            if (billId == null) {
+                emptyList()
+            } else if (role == DeviceRole.SERVER) {
+                repository.getOrderItemsForBill(billId).firstOrNull() ?: emptyList()
+            } else {
+                remoteItems.filter { it.billId == billId }
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        currentPayments = selectedTable.flatMapLatest { table ->
+            val billId = table?.currentBillId
+            if (billId != null && _deviceRole.value == DeviceRole.SERVER) {
+                repository.getPaymentsForBill(billId)
+            } else {
+                flowOf(emptyList())
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        filteredMenuItems = combine(allMenuItems, _selectedCategoryId, _menuSearchQuery) { items, catId, query ->
+            items.filter { item ->
+                val matchesCategory = catId == 0 || item.categoryId == catId
+                val matchesQuery = query.isBlank() ||
+                    item.name.contains(query, ignoreCase = true) ||
+                    item.description.contains(query, ignoreCase = true)
+                matchesCategory && matchesQuery && item.isAvailable
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        viewModelScope.launch {
+            repository.seedInitialDataIfNeeded()
+            refreshDetailedReport()
+        }
+
+        initNetworking()
+    }
+
+    private fun initNetworking() {
+        stopNetworking()
+        nsdHelper = PosNsdHelper(getApplication())
+
+        when (_deviceRole.value) {
+            DeviceRole.SERVER -> startServer()
+            DeviceRole.WAITER, DeviceRole.KITCHEN -> startClientDiscovery()
+        }
+    }
+
+    private fun startServer() {
+        try {
+            server = LocalPosServer(
+                port = 8887,
+                onClientHandshake = { socket ->
+                    viewModelScope.launch {
+                        val activeItems = repository.activeOrderItems.firstOrNull() ?: emptyList()
+                        val payload = FullSyncPayload(
+                            restaurantName = _restaurantName.value,
+                            tables = allTables.value,
+                            categories = allCategories.value,
+                            menuItems = allMenuItems.value,
+                            activeTickets = activeKitchenTickets.value,
+                            activeOrderItems = activeItems
+                        )
+                        server?.sendPacket(
+                            socket,
+                            NetworkPacket(action = "FULL_SYNC", payload = Gson().toJson(payload))
+                        )
+                    }
+                },
+                onAddOrderReceived = { addOrderPayload ->
+                    viewModelScope.launch {
+                        val menuItemsList = repository.getAllMenuItemsSync()
+                        for (item in addOrderPayload.items) {
+                            val matchedItem = menuItemsList.find { it.name == item.itemName }
+                                ?: MenuItem(name = item.itemName, price = 0.0, categoryId = 1)
+                            for (q in 1..item.quantity) {
+                                repository.addMenuItemToBill(
+                                    tableId = addOrderPayload.tableId,
+                                    menuItem = matchedItem,
+                                    categoryName = item.categoryName,
+                                    note = item.note
+                                )
+                            }
+                        }
+                        repository.createKitchenTicket(
+                            tableId = addOrderPayload.tableId,
+                            tableName = addOrderPayload.tableName,
+                            waiterName = addOrderPayload.waiterName,
+                            items = addOrderPayload.items
+                        )
+                        _snackbarMessage.value = "${addOrderPayload.tableName} için yeni sipariş alındı"
+                    }
+                },
+                onUpdateTicketReceived = { updatePayload ->
+                    viewModelScope.launch {
+                        repository.updateKitchenTicketStatus(updatePayload.ticketId, updatePayload.status)
+                    }
+                }
+            ).apply {
+                start()
+            }
+
+            _connectionStatus.value = ConnectionStatus.CONNECTED
+            nsdHelper?.registerServer(8887)
+
+            viewModelScope.launch {
+                server?.connectedClientCount?.collect { count ->
+                    _connectedClientCount.value = count
+                }
+            }
+
+            viewModelScope.launch {
+                repository.allTables.collect { tables ->
+                    server?.broadcastTables(tables)
+                }
+            }
+
+            viewModelScope.launch {
+                repository.activeKitchenTickets.collect { tickets ->
+                    server?.broadcastTickets(tickets)
+                }
+            }
+
+            viewModelScope.launch {
+                repository.activeOrderItems.collect { items ->
+                    server?.broadcastActiveItems(items)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("POSViewModel", "Failed to start local server", e)
+            _connectionStatus.value = ConnectionStatus.ERROR
+        }
+    }
+
+    private fun startClientDiscovery() {
+        _connectionStatus.value = ConnectionStatus.SEARCHING
+        nsdHelper?.startDiscovery { host, port ->
+            _resolvedServerHost.value = host
+            connectClientToHost(host, port)
+        }
+    }
+
+    fun connectClientToHost(host: String, port: Int = 8887) {
+        try {
+            client?.close()
+            _connectionStatus.value = ConnectionStatus.CONNECTING
+            _resolvedServerHost.value = host
+
+            val uri = URI("ws://$host:$port")
+            client = LocalPosClient(
+                serverUri = uri,
+                role = _deviceRole.value,
+                deviceName = Build.MODEL ?: "Android Cihaz",
+                onFullSyncReceived = { fullSync ->
+                    _restaurantName.value = fullSync.restaurantName
+                    _remoteTables.value = fullSync.tables
+                    _remoteCategories.value = fullSync.categories
+                    _remoteMenuItems.value = fullSync.menuItems
+                    _remoteKitchenTickets.value = fullSync.activeTickets
+                    _remoteActiveItems.value = fullSync.activeOrderItems
+                    _connectionStatus.value = ConnectionStatus.CONNECTED
+                },
+                onTablesUpdateReceived = { tables ->
+                    _remoteTables.value = tables
+                },
+                onKitchenTicketsUpdateReceived = { tickets ->
+                    _remoteKitchenTickets.value = tickets
+                },
+                onActiveItemsUpdateReceived = { items ->
+                    _remoteActiveItems.value = items
+                }
+            ).apply {
+                connect()
+            }
+
+            viewModelScope.launch {
+                client?.connectionStatus?.collect { status ->
+                    _connectionStatus.value = status
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("POSViewModel", "Failed to connect client to $host:$port", e)
+            _connectionStatus.value = ConnectionStatus.ERROR
+        }
+    }
+
+    fun switchDeviceRole(newRole: DeviceRole) {
+        prefs.edit().putString("device_role", newRole.name).apply()
+        _deviceRole.value = newRole
+        _currentScreen.value = if (newRole == DeviceRole.KITCHEN) AppScreen.KITCHEN else AppScreen.TABLES
+        _snackbarMessage.value = "Cihaz modu '${newRole.title}' olarak ayarlandı"
+        initNetworking()
+    }
+
+    fun connectManualIp(ip: String) {
+        connectClientToHost(ip, 8887)
+    }
+
+    fun navigateTo(screen: AppScreen) {
+        _currentScreen.value = screen
+        if (screen == AppScreen.MANAGEMENT) {
+            refreshDetailedReport()
+        }
+    }
+
+    fun selectReportPeriod(period: ReportPeriod) {
+        _selectedReportPeriod.value = period
+        refreshDetailedReport(period)
+    }
+
+    fun refreshDetailedReport(period: ReportPeriod = _selectedReportPeriod.value) {
+        viewModelScope.launch {
+            _detailedReport.value = repository.getDetailedReport(period)
+        }
+    }
+
+    fun selectZone(zone: String) {
+        _selectedZone.value = zone
+    }
+
+    fun selectTable(tableId: Int?) {
+        _selectedTableId.value = tableId
+        _menuSearchQuery.value = ""
+    }
+
+    fun selectCategory(categoryId: Int) {
+        _selectedCategoryId.value = categoryId
+    }
+
+    fun updateSearchQuery(query: String) {
+        _menuSearchQuery.value = query
+    }
+
+    fun clearSnackbar() {
+        _snackbarMessage.value = null
+    }
+
+    fun addItemToCurrentTable(menuItem: MenuItem, note: String = "") {
+        val tableId = _selectedTableId.value ?: return
+        val categoryName = allCategories.value.find { it.id == menuItem.categoryId }?.name ?: "Genel"
+
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.addMenuItemToBill(tableId, menuItem, categoryName, note)
+            }
+        } else {
+            val ticketItem = KitchenTicketItemDto(
+                itemName = menuItem.name,
+                categoryName = categoryName,
+                quantity = 1,
+                note = note
+            )
+            val payload = AddOrderPayload(
+                tableId = tableId,
+                tableName = selectedTable.value?.name ?: "Masa $tableId",
+                waiterName = "Garson",
+                items = listOf(ticketItem)
+            )
+            client?.sendAddOrder(payload)
+            _snackbarMessage.value = "'${menuItem.name}' mutfağa ve masaya eklendi"
+        }
+    }
+
+    fun sendOrderToKitchen(tableId: Int) {
+        val table = allTables.value.find { it.id == tableId } ?: return
+        viewModelScope.launch {
+            val items = repository.getOrderItemsForBill(table.currentBillId ?: 0L).firstOrNull() ?: emptyList()
+            if (items.isNotEmpty()) {
+                val dtoList = items.map {
+                    KitchenTicketItemDto(
+                        id = it.id,
+                        itemName = it.itemName,
+                        categoryName = it.categoryName,
+                        quantity = it.quantity,
+                        note = it.note
+                    )
+                }
+                repository.createKitchenTicket(
+                    tableId = table.id,
+                    tableName = table.name,
+                    waiterName = "Kasa",
+                    items = dtoList
+                )
+                _snackbarMessage.value = "${table.name} siparişi mutfak ekranına iletildi!"
+            }
+        }
+    }
+
+    fun updateKitchenTicketStatus(ticketId: String, status: String) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.updateKitchenTicketStatus(ticketId, status)
+            }
+        } else {
+            client?.sendUpdateTicketStatus(ticketId, status)
+        }
+    }
+
+    fun incrementItem(item: OrderItem) {
+        val tableId = _selectedTableId.value ?: return
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.incrementOrderItem(tableId, item)
+            }
+        } else {
+            addItemToCurrentTable(
+                MenuItem(name = item.itemName, price = item.unitPrice, categoryId = 1),
+                item.note
+            )
+        }
+    }
+
+    fun decrementItem(item: OrderItem) {
+        val tableId = _selectedTableId.value ?: return
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.decrementOrderItem(tableId, item)
+            }
+        }
+    }
+
+    fun removeItem(item: OrderItem) {
+        val tableId = _selectedTableId.value ?: return
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.removeOrderItem(tableId, item)
+            }
+        }
+    }
+
+    fun updateItemNote(item: OrderItem, note: String) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.updateOrderItemNote(item, note)
+            }
+        }
+    }
+
+    fun applyDiscount(discountAmount: Double) {
+        val tableId = _selectedTableId.value ?: return
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.applyDiscountToBill(tableId, discountAmount)
+                _snackbarMessage.value = if (discountAmount > 0) {
+                    "₺${"%.2f".format(discountAmount)} indirim uygulandı"
+                } else {
+                    "İndirim kaldırıldı"
+                }
+            }
+        }
+    }
+
+    fun makePayment(
+        amount: Double,
+        method: String,
+        note: String = "",
+        closeTableIfPaid: Boolean = true,
+        paidItemQuantities: Map<Long, Int> = emptyMap(),
+        onTableClosed: () -> Unit = {}
+    ) {
+        val tableId = _selectedTableId.value ?: return
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                val closed = repository.processPayment(
+                    tableId = tableId,
+                    amount = amount,
+                    paymentMethod = method,
+                    note = note,
+                    closeTableIfPaid = closeTableIfPaid,
+                    paidItemQuantities = paidItemQuantities
+                )
+                refreshDetailedReport()
+                if (closed) {
+                    _snackbarMessage.value = "Hesap kapatıldı (₺${"%.2f".format(amount)} - $method)"
+                    onTableClosed()
+                } else {
+                    _snackbarMessage.value = "Ara ödeme alındı: ₺${"%.2f".format(amount)} ($method)"
+                }
+            }
+        }
+    }
+
+    fun cancelTableOrder(onComplete: () -> Unit = {}) {
+        val tableId = _selectedTableId.value ?: return
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.cancelAndClearTable(tableId)
+                _snackbarMessage.value = "Masa adisyonu iptal edildi"
+                onComplete()
+            }
+        }
+    }
+
+    fun transferCurrentTable(targetTableId: Int, onComplete: () -> Unit = {}) {
+        val fromId = _selectedTableId.value ?: return
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.transferTable(fromId, targetTableId)
+                _selectedTableId.value = targetTableId
+                _snackbarMessage.value = "Masa başarıyla aktarıldı"
+                onComplete()
+            }
+        }
+    }
+
+    fun addCustomProduct(categoryId: Int, name: String, price: Double, description: String) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.addCustomMenuItem(categoryId, name, price, description)
+                _snackbarMessage.value = "'$name' menüye eklendi"
+            }
+        }
+    }
+
+    fun updateProduct(item: MenuItem) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.updateMenuItem(item)
+                _snackbarMessage.value = "'${item.name}' güncellendi"
+            }
+        }
+    }
+
+    fun deleteProduct(item: MenuItem) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.deleteMenuItem(item)
+                _snackbarMessage.value = "'${item.name}' silindi"
+            }
+        }
+    }
+
+    fun addCategory(name: String, iconName: String = "dinner") {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.addMenuCategory(name, iconName)
+                _snackbarMessage.value = "'$name' kategorisi eklendi"
+            }
+        }
+    }
+
+    fun updateCategory(category: MenuCategory) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.updateMenuCategory(category)
+                _snackbarMessage.value = "'${category.name}' kategorisi güncellendi"
+            }
+        }
+    }
+
+    fun deleteCategory(category: MenuCategory) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.deleteMenuCategory(category)
+                _snackbarMessage.value = "'${category.name}' kategorisi silindi"
+            }
+        }
+    }
+
+    fun addTable(name: String, zone: String, capacity: Int) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.addNewTable(name, zone, capacity)
+                _snackbarMessage.value = "'$name' ($zone) eklendi"
+            }
+        }
+    }
+
+    fun updateTable(table: RestaurantTable, name: String, zone: String, capacity: Int) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.updateTableInfo(table, name, zone, capacity)
+                _snackbarMessage.value = "'$name' güncellendi"
+            }
+        }
+    }
+
+    fun deleteTable(table: RestaurantTable) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                val deleted = repository.deleteTableIfEmpty(table)
+                if (deleted) {
+                    _snackbarMessage.value = "'${table.name}' silindi"
+                } else {
+                    _snackbarMessage.value = "Açık adisyonu olan masa silinemez!"
+                }
+            }
+        }
+    }
+
+    fun updateRestaurantInfo(name: String) {
+        val cleanName = name.trim().ifBlank { "Xubopos" }
+        prefs.edit()
+            .putString("restaurant_name", cleanName)
+            .remove("restaurant_subtitle")
+            .apply()
+        _restaurantName.value = cleanName
+        _snackbarMessage.value = "İşletme adı '$cleanName' olarak güncellendi"
+    }
+
+    private fun stopNetworking() {
+        try {
+            server?.stop()
+        } catch (_: Exception) {}
+        server = null
+
+        try {
+            client?.close()
+        } catch (_: Exception) {}
+        client = null
+
+        try {
+            nsdHelper?.stop()
+        } catch (_: Exception) {}
+        nsdHelper = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopNetworking()
+    }
+}
