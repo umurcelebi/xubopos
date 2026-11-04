@@ -29,14 +29,17 @@ import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestaurantMenu
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.TableRestaurant
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Wifi
@@ -45,6 +48,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -75,16 +79,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xubopos.BuildConfig
 import com.xubopos.data.model.DetailedSalesReport
 import com.xubopos.data.model.MenuCategory
 import com.xubopos.data.model.MenuItem
 import com.xubopos.data.model.ReportPeriod
 import com.xubopos.data.model.RestaurantTable
+import com.xubopos.update.UpdateStatus
+import java.io.File
 import com.xubopos.ui.theme.Amber100
 import com.xubopos.ui.theme.Amber50
 import com.xubopos.ui.theme.Amber500
@@ -129,6 +137,8 @@ fun ManagementScreen(
     val detailedReport by viewModel.detailedReport.collectAsState()
     val snackbarMessage by viewModel.snackbarMessage.collectAsState()
     val restaurantName by viewModel.restaurantName.collectAsState()
+    val updateStatus by viewModel.updateStatus.collectAsState()
+    val context = LocalContext.current
 
     var selectedTab by remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -319,7 +329,11 @@ fun ManagementScreen(
                     onSave = { name ->
                         viewModel.updateRestaurantInfo(name)
                     },
-                    onOpenRoleSettings = onOpenRoleSettings
+                    onOpenRoleSettings = onOpenRoleSettings,
+                    updateStatus = updateStatus,
+                    onCheckForUpdates = { viewModel.checkForUpdates(BuildConfig.VERSION_NAME) },
+                    onDownloadAndInstall = { url -> viewModel.downloadAndInstallUpdate(context, url) },
+                    onInstallDownloadedApk = { file -> viewModel.installDownloadedApk(context, file) }
                 )
             }
         }
@@ -1410,7 +1424,11 @@ private fun FilledActionButton(
 private fun RestaurantSettingsTab(
     currentName: String,
     onSave: (String) -> Unit,
-    onOpenRoleSettings: () -> Unit = {}
+    onOpenRoleSettings: () -> Unit = {},
+    updateStatus: UpdateStatus = UpdateStatus.Idle,
+    onCheckForUpdates: () -> Unit = {},
+    onDownloadAndInstall: (String) -> Unit = {},
+    onInstallDownloadedApk: (File) -> Unit = {}
 ) {
     var nameInput by remember(currentName) { mutableStateOf(currentName) }
 
@@ -1582,6 +1600,270 @@ private fun RestaurantSettingsTab(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Cihaz Çalışma Rolünü Değiştir (Kasa / Garson / Mutfak)")
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = PureWhite),
+                border = BorderStroke(1.dp, Slate200)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Emerald50,
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.SystemUpdate,
+                                        contentDescription = null,
+                                        tint = Emerald600,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                            Column {
+                                Text(
+                                    text = "Uygulama Güncellemesi",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate900
+                                )
+                                Text(
+                                    text = "Mevcut Sürüm: v${BuildConfig.VERSION_NAME} (Yapı ${BuildConfig.VERSION_CODE})",
+                                    fontSize = 12.sp,
+                                    color = Slate500
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Slate100
+                        ) {
+                            Text(
+                                text = "GitHub",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate700,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    when (val state = updateStatus) {
+                        is UpdateStatus.Checking -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Amber500
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "GitHub'da yeni sürüm denetleniyor...",
+                                    fontSize = 13.sp,
+                                    color = Slate700
+                                )
+                            }
+                        }
+
+                        is UpdateStatus.UpdateAvailable -> {
+                            val info = state.info
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Amber50,
+                                border = BorderStroke(1.dp, Amber500.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Download,
+                                            contentDescription = null,
+                                            tint = Amber600,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Yeni Sürüm Hazır: ${info.latestVersion}",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Amber700
+                                        )
+                                    }
+                                    if (info.releaseNotes.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = info.releaseNotes,
+                                            fontSize = 12.sp,
+                                            color = Slate700,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Button(
+                                        onClick = { onDownloadAndInstall(info.downloadUrl) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Amber600),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "Yeni Sürümü İndir ve Kur (${"%.1f".format(info.apkSize / 1048576.0)} MB)",
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        is UpdateStatus.Downloading -> {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                LinearProgressIndicator(
+                                    progress = { state.progressPercent / 100f },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp),
+                                    color = Amber500
+                                )
+                                Text(
+                                    text = "İndiriliyor: %${state.progressPercent} • ${"%.1f".format(state.downloadedBytes / 1048576.0)} MB / ${"%.1f".format(state.totalBytes / 1048576.0)} MB",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Slate700
+                                )
+                            }
+                        }
+
+                        is UpdateStatus.ReadyToInstall -> {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Emerald50,
+                                border = BorderStroke(1.dp, Emerald500),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text(
+                                        text = "✓ Güncelleme Paketi İndirildi!",
+                                        fontWeight = FontWeight.Bold,
+                                        color = Emerald700
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Button(
+                                        onClick = { onInstallDownloadedApk(state.apkFile) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Paketi Şimdi Yükle", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        is UpdateStatus.UpToDate -> {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Emerald50,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = Emerald600,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Uygulamanız en son sürümde (v${BuildConfig.VERSION_NAME})",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Emerald700
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedButton(
+                                onClick = onCheckForUpdates,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Tekrar Denetle")
+                            }
+                        }
+
+                        is UpdateStatus.Error -> {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Rose50,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Hata: ${state.message}",
+                                    fontSize = 12.sp,
+                                    color = Rose600,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedButton(
+                                onClick = onCheckForUpdates,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Yeniden Dene")
+                            }
+                        }
+
+                        else -> {
+                            Button(
+                                onClick = onCheckForUpdates,
+                                colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Güncellemeleri Denetle")
+                            }
+                        }
                     }
                 }
             }

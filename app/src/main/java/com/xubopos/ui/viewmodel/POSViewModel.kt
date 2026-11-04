@@ -28,6 +28,10 @@ import com.xubopos.network.LocalPosClient
 import com.xubopos.network.LocalPosServer
 import com.xubopos.network.NetworkPacket
 import com.xubopos.network.PosNsdHelper
+import com.xubopos.update.AppUpdateManager
+import com.xubopos.update.UpdateInfo
+import com.xubopos.update.UpdateStatus
+import java.io.File
 import java.net.URI
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -112,6 +116,9 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _detailedReport = MutableStateFlow(DetailedSalesReport())
     val detailedReport: StateFlow<DetailedSalesReport> = _detailedReport.asStateFlow()
+
+    private val _updateStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
+    val updateStatus: StateFlow<UpdateStatus> = _updateStatus.asStateFlow()
 
     val selectedTable: StateFlow<RestaurantTable?>
     val currentBill: StateFlow<OrderBill?>
@@ -672,6 +679,45 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             .apply()
         _restaurantName.value = cleanName
         _snackbarMessage.value = "İşletme adı '$cleanName' olarak güncellendi"
+    }
+
+    fun checkForUpdates(currentVersion: String) {
+        viewModelScope.launch {
+            _updateStatus.value = UpdateStatus.Checking
+            val result = AppUpdateManager.checkForUpdates(currentVersion)
+            result.onSuccess { info ->
+                if (info.isUpdateAvailable) {
+                    _updateStatus.value = UpdateStatus.UpdateAvailable(info)
+                } else {
+                    _updateStatus.value = UpdateStatus.UpToDate
+                }
+            }.onFailure { error ->
+                _updateStatus.value = UpdateStatus.Error(error.message ?: "Güncelleme denetlenirken hata oluştu")
+            }
+        }
+    }
+
+    fun downloadAndInstallUpdate(context: Context, downloadUrl: String) {
+        viewModelScope.launch {
+            _updateStatus.value = UpdateStatus.Downloading(0, 0L, 0L)
+            val result = AppUpdateManager.downloadApk(context, downloadUrl) { percent, downloaded, total ->
+                _updateStatus.value = UpdateStatus.Downloading(percent, downloaded, total)
+            }
+            result.onSuccess { apkFile ->
+                _updateStatus.value = UpdateStatus.ReadyToInstall(apkFile)
+                AppUpdateManager.installApk(context, apkFile)
+            }.onFailure { error ->
+                _updateStatus.value = UpdateStatus.Error(error.message ?: "APK indirilirken hata oluştu")
+            }
+        }
+    }
+
+    fun installDownloadedApk(context: Context, apkFile: File) {
+        AppUpdateManager.installApk(context, apkFile)
+    }
+
+    fun resetUpdateStatus() {
+        _updateStatus.value = UpdateStatus.Idle
     }
 
     private fun stopNetworking() {
