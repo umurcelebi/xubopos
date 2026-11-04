@@ -679,18 +679,27 @@ private fun MenuCatalogSection(
         ) {
             items(menuItems, key = { it.id }) { product ->
                 val inBillCount = itemCountMap[product.id] ?: 0
+                val isSoldOut = product.hasDailyLimit && product.remainingStock <= 0
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .clickable { onAddMenuItem(product) },
+                        .clickable(enabled = !isSoldOut) { onAddMenuItem(product) },
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (inBillCount > 0) Amber50 else PureWhite
+                        containerColor = when {
+                            isSoldOut -> Slate100.copy(alpha = 0.5f)
+                            inBillCount > 0 -> Amber50
+                            else -> PureWhite
+                        }
                     ),
                     border = BorderStroke(
                         if (inBillCount > 0) 1.5.dp else 1.dp,
-                        if (inBillCount > 0) Amber500 else Slate200
+                        when {
+                            isSoldOut -> Slate200
+                            inBillCount > 0 -> Amber500
+                            else -> Slate200
+                        }
                     ),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
@@ -700,6 +709,22 @@ private fun MenuCatalogSection(
                             .padding(12.dp),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
+                        if (product.hasDailyLimit) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isSoldOut) Rose50 else Amber50,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            ) {
+                                Text(
+                                    text = if (isSoldOut) "TÜKENDİ" else "Kalan: ${product.remainingStock} Adet",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSoldOut) Rose600 else Amber700,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -709,7 +734,7 @@ private fun MenuCatalogSection(
                                 text = product.name,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
-                                color = Slate900,
+                                color = if (isSoldOut) Slate500 else Slate900,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
@@ -753,7 +778,7 @@ private fun MenuCatalogSection(
                                 text = "₺${"%.2f".format(product.price)}",
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 15.sp,
-                                color = Amber700
+                                color = if (isSoldOut) Slate400 else Amber700
                             )
                             if (inBillCount > 0) {
                                 Row(
@@ -784,11 +809,11 @@ private fun MenuCatalogSection(
 
                                     Surface(
                                         shape = CircleShape,
-                                        color = Amber500,
+                                        color = if (isSoldOut) Slate300 else Amber500,
                                         modifier = Modifier
                                             .size(28.dp)
                                             .clip(CircleShape)
-                                            .clickable { onAddMenuItem(product) }
+                                            .clickable(enabled = !isSoldOut) { onAddMenuItem(product) }
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(
@@ -800,7 +825,7 @@ private fun MenuCatalogSection(
                                         }
                                     }
                                 }
-                            } else {
+                            } else if (!isSoldOut) {
                                 Surface(
                                     shape = CircleShape,
                                     color = Slate100,

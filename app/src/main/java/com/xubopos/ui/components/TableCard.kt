@@ -235,18 +235,6 @@ fun TableCard(
                                 )
                             }
                         }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Slate100
-                        ) {
-                            Text(
-                                text = "Sipariş Aç →",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Amber600,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
                     }
                 }
             }

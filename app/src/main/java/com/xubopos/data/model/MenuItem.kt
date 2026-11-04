@@ -20,5 +20,8 @@ data class MenuItem(
     val name: String,
     val description: String = "",
     val price: Double,
-    val isAvailable: Boolean = true
+    val isAvailable: Boolean = true,
+    val hasDailyLimit: Boolean = false,
+    val dailyLimit: Int = 0,
+    val remainingStock: Int = 0
 )

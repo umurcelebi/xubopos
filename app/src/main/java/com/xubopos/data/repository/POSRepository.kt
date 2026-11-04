@@ -64,7 +64,7 @@ class POSRepository(private val dao: RestaurantDao) {
         }
     }
 
-    suspend fun getDetailedReport(period: ReportPeriod): DetailedSalesReport {
+    suspend fun getDetailedReport(period: ReportPeriod, lastDayCloseTime: Long = 0L): DetailedSalesReport {
         val cal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
@@ -72,7 +72,7 @@ class POSRepository(private val dao: RestaurantDao) {
             set(Calendar.MILLISECOND, 0)
         }
         val startTime = when (period) {
-            ReportPeriod.TODAY -> cal.timeInMillis
+            ReportPeriod.TODAY -> maxOf(cal.timeInMillis, lastDayCloseTime)
             ReportPeriod.WEEK -> {
                 cal.add(Calendar.DAY_OF_YEAR, -6)
                 cal.timeInMillis
@@ -158,8 +158,13 @@ class POSRepository(private val dao: RestaurantDao) {
         return true
     }
 
-    suspend fun addMenuItemToBill(tableId: Int, menuItem: MenuItem, categoryName: String, note: String = "") {
-        val table = dao.getTableById(tableId) ?: return
+    suspend fun addMenuItemToBill(tableId: Int, menuItem: MenuItem, categoryName: String, note: String = ""): Boolean {
+        val freshItem = dao.getMenuItemById(menuItem.id) ?: menuItem
+        if (freshItem.hasDailyLimit && freshItem.remainingStock <= 0) {
+            return false
+        }
+
+        val table = dao.getTableById(tableId) ?: return false
         var billId = table.currentBillId
         val now = System.currentTimeMillis()
 
@@ -201,29 +206,67 @@ class POSRepository(private val dao: RestaurantDao) {
                 )
             )
         }
+
+        if (freshItem.hasDailyLimit) {
+            dao.updateRemainingStock(freshItem.id, (freshItem.remainingStock - 1).coerceAtLeast(0))
+        }
+
         recalculateBillAndTable(billId, tableId)
+        return true
     }
 
-    suspend fun incrementOrderItem(tableId: Int, item: OrderItem) {
+    suspend fun incrementOrderItem(tableId: Int, item: OrderItem): Boolean {
+        item.menuItemId?.let { mId ->
+            val mItem = dao.getMenuItemById(mId)
+            if (mItem != null && mItem.hasDailyLimit) {
+                if (mItem.remainingStock <= 0) return false
+                dao.updateRemainingStock(mId, (mItem.remainingStock - 1).coerceAtLeast(0))
+            }
+        }
         dao.updateOrderItem(item.copy(quantity = item.quantity + 1))
         recalculateBillAndTable(item.billId, tableId)
+        return true
     }
 
     suspend fun decrementOrderItem(tableId: Int, item: OrderItem) {
         val minKeep = item.paidQuantity.coerceAtLeast(0)
         if (item.quantity > 1 && item.quantity > minKeep) {
             dao.updateOrderItem(item.copy(quantity = item.quantity - 1))
+            item.menuItemId?.let { mId ->
+                dao.getMenuItemById(mId)?.let { m ->
+                    if (m.hasDailyLimit) {
+                        dao.updateRemainingStock(mId, (m.remainingStock + 1).coerceAtMost(m.dailyLimit))
+                    }
+                }
+            }
         } else if (item.paidQuantity == 0) {
             dao.deleteOrderItem(item)
+            item.menuItemId?.let { mId ->
+                dao.getMenuItemById(mId)?.let { m ->
+                    if (m.hasDailyLimit) {
+                        dao.updateRemainingStock(mId, (m.remainingStock + 1).coerceAtMost(m.dailyLimit))
+                    }
+                }
+            }
         }
         recalculateBillAndTable(item.billId, tableId)
     }
 
     suspend fun removeOrderItem(tableId: Int, item: OrderItem) {
+        val returnedQuantity = (item.quantity - item.paidQuantity).coerceAtLeast(0)
         if (item.paidQuantity > 0) {
             dao.updateOrderItem(item.copy(quantity = item.paidQuantity))
         } else {
             dao.deleteOrderItem(item)
+        }
+        if (returnedQuantity > 0) {
+            item.menuItemId?.let { mId ->
+                dao.getMenuItemById(mId)?.let { m ->
+                    if (m.hasDailyLimit) {
+                        dao.updateRemainingStock(mId, (m.remainingStock + returnedQuantity).coerceAtMost(m.dailyLimit))
+                    }
+                }
+            }
         }
         recalculateBillAndTable(item.billId, tableId)
     }
@@ -408,16 +451,30 @@ class POSRepository(private val dao: RestaurantDao) {
         }
     }
 
-    suspend fun addCustomMenuItem(categoryId: Int, name: String, price: Double, description: String = "") {
+    suspend fun addCustomMenuItem(
+        categoryId: Int,
+        name: String,
+        price: Double,
+        description: String = "",
+        hasDailyLimit: Boolean = false,
+        dailyLimit: Int = 0
+    ) {
         dao.insertMenuItem(
             MenuItem(
                 categoryId = categoryId,
                 name = name,
                 description = description,
                 price = price,
-                isAvailable = true
+                isAvailable = true,
+                hasDailyLimit = hasDailyLimit,
+                dailyLimit = dailyLimit,
+                remainingStock = if (hasDailyLimit) dailyLimit else 0
             )
         )
+    }
+
+    suspend fun resetDailyStockLimits() {
+        dao.resetAllDailyStocks()
     }
 
     suspend fun updateMenuItem(item: MenuItem) {

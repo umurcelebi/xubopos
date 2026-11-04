@@ -68,6 +68,15 @@ interface RestaurantDao {
     @Update
     suspend fun updateMenuItem(item: MenuItem)
 
+    @Query("SELECT * FROM menu_items WHERE id = :id")
+    suspend fun getMenuItemById(id: Int): MenuItem?
+
+    @Query("UPDATE menu_items SET remainingStock = dailyLimit WHERE hasDailyLimit = 1")
+    suspend fun resetAllDailyStocks()
+
+    @Query("UPDATE menu_items SET remainingStock = :newStock WHERE id = :id")
+    suspend fun updateRemainingStock(id: Int, newStock: Int)
+
     @Delete
     suspend fun deleteMenuItem(item: MenuItem)
 

@@ -178,17 +178,14 @@ fun TablesScreen(
                             )
                         }
 
-                        // Cihaz Modu Rozet Butonu
+                        // Cihaz Modu Rozeti (Sadece Görüntüleme)
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = when (deviceRole) {
                                 DeviceRole.SERVER -> Amber500
                                 DeviceRole.WAITER -> Sky500
                                 DeviceRole.KITCHEN -> Emerald500
-                            },
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { onOpenRoleSettings() }
+                            }
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),

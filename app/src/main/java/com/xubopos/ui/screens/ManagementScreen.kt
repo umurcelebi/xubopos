@@ -62,6 +62,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -306,7 +307,9 @@ fun ManagementScreen(
                     onAddCategory = { name -> viewModel.addCategory(name) },
                     onUpdateCategory = viewModel::updateCategory,
                     onDeleteCategory = viewModel::deleteCategory,
-                    onAddProduct = viewModel::addCustomProduct,
+                    onAddProduct = { catId, name, price, desc, hasDailyLimit, limit ->
+                        viewModel.addCustomProduct(catId, name, price, desc, hasDailyLimit, limit)
+                    },
                     onUpdateProduct = viewModel::updateProduct,
                     onDeleteProduct = viewModel::deleteProduct
                 )
@@ -321,7 +324,8 @@ fun ManagementScreen(
                 2 -> SalesReportTab(
                     selectedPeriod = selectedPeriod,
                     report = detailedReport,
-                    onSelectPeriod = viewModel::selectReportPeriod
+                    onSelectPeriod = viewModel::selectReportPeriod,
+                    onCloseDay = viewModel::closeDay
                 )
 
                 3 -> RestaurantSettingsTab(
@@ -347,7 +351,7 @@ private fun MenuManagementTab(
     onAddCategory: (String) -> Unit,
     onUpdateCategory: (MenuCategory) -> Unit,
     onDeleteCategory: (MenuCategory) -> Unit,
-    onAddProduct: (Int, String, Double, String) -> Unit,
+    onAddProduct: (Int, String, Double, String, Boolean, Int) -> Unit,
     onUpdateProduct: (MenuItem) -> Unit,
     onDeleteProduct: (MenuItem) -> Unit
 ) {
@@ -369,96 +373,89 @@ private fun MenuManagementTab(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = PureWhite),
-                border = BorderStroke(1.dp, Slate200)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Category,
-                                contentDescription = null,
-                                tint = Amber600
-                            )
-                            Column {
-                                Text(
-                                    text = "Menü Kategorileri (${categories.size})",
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 15.sp,
-                                    color = Slate900
-                                )
-                                Text(
-                                    text = "Kategoriye dokunarak filtreleyin, düzenlemek için kaleme basın",
-                                    fontSize = 11.sp,
-                                    color = Slate500
-                                )
-                            }
-                        }
-                        FilledActionButton(
-                            text = "Kategori Ekle",
-                            onClick = { showAddCategoryDialog = true }
+                        Icon(
+                            imageVector = Icons.Default.Category,
+                            contentDescription = null,
+                            tint = Amber600,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Kategoriler (${categories.size})",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 15.sp,
+                            color = Slate900
                         )
                     }
+                    FilledActionButton(
+                        text = "Kategori Ekle",
+                        onClick = { showAddCategoryDialog = true }
+                    )
+                }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        item {
-                            FilterChip(
-                                selected = selectedCategoryId == 0,
-                                onClick = { selectedCategoryId = 0 },
-                                label = {
-                                    Text(
-                                        text = "Tümü (${menuItems.size})",
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Slate900,
-                                    selectedLabelColor = PureWhite
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    item {
+                        FilterChip(
+                            selected = selectedCategoryId == 0,
+                            onClick = { selectedCategoryId = 0 },
+                            label = {
+                                Text(
+                                    text = "Tümü (${menuItems.size})",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
                                 )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Slate900,
+                                selectedLabelColor = PureWhite
                             )
-                        }
-                        items(categories, key = { it.id }) { cat ->
-                            val count = menuItems.count { it.categoryId == cat.id }
-                            val isSelected = selectedCategoryId == cat.id
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { selectedCategoryId = cat.id },
-                                label = {
-                                    Text(
-                                        text = "${cat.name} ($count)",
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                },
-                                trailingIcon = {
-                                    IconButton(
-                                        onClick = { editingCategory = cat },
-                                        modifier = Modifier.size(20.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Edit,
-                                            contentDescription = "Düzenle",
-                                            modifier = Modifier.size(13.dp),
-                                            tint = if (isSelected) Amber500 else Slate500
-                                        )
-                                    }
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Slate900,
-                                    selectedLabelColor = PureWhite
+                        )
+                    }
+                    items(categories, key = { it.id }) { cat ->
+                        val count = menuItems.count { it.categoryId == cat.id }
+                        val isSelected = selectedCategoryId == cat.id
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedCategoryId = cat.id },
+                            label = {
+                                Text(
+                                    text = "${cat.name} ($count)",
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.sp
                                 )
+                            },
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = { editingCategory = cat },
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Düzenle",
+                                        modifier = Modifier.size(13.dp),
+                                        tint = if (isSelected) Amber500 else Slate500
+                                    )
+                                }
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Slate900,
+                                selectedLabelColor = PureWhite
                             )
-                        }
+                        )
                     }
                 }
             }
@@ -516,19 +513,40 @@ private fun MenuManagementTab(
                             .weight(1f)
                             .padding(end = 8.dp)
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Amber50,
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(bottom = 3.dp)
                         ) {
-                            Text(
-                                text = categoryName,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Amber700,
-                                maxLines = 1,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Amber50
+                            ) {
+                                Text(
+                                    text = categoryName,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Amber700,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                            if (product.hasDailyLimit) {
+                                val isSoldOut = product.remainingStock <= 0
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isSoldOut) Rose50 else Sky50
+                                ) {
+                                    Text(
+                                        text = if (isSoldOut) "Tükendi" else "Kota: ${product.remainingStock}/${product.dailyLimit}",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSoldOut) Rose600 else Sky700,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
                         }
                         Text(
                             text = product.name,
@@ -693,6 +711,10 @@ private fun MenuManagementTab(
             )
         }
         var desc by remember { mutableStateOf(editingProduct?.description ?: "") }
+        var hasDailyLimit by remember { mutableStateOf(editingProduct?.hasDailyLimit ?: false) }
+        var dailyLimitText by remember {
+            mutableStateOf(editingProduct?.dailyLimit?.takeIf { it > 0 }?.toString() ?: "15")
+        }
 
         AlertDialog(
             onDismissRequest = { showProductModal = false },
@@ -741,6 +763,45 @@ private fun MenuManagementTab(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                text = "Günlük Porsiyon / Kota Limiti",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate900
+                            )
+                            Text(
+                                text = "Günü kapatıldığında bu sayıya tazelenir",
+                                fontSize = 11.sp,
+                                color = Slate500
+                            )
+                        }
+                        Switch(
+                            checked = hasDailyLimit,
+                            onCheckedChange = { hasDailyLimit = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = PureWhite,
+                                checkedTrackColor = Amber600
+                            )
+                        )
+                    }
+
+                    if (hasDailyLimit) {
+                        OutlinedTextField(
+                            value = dailyLimitText,
+                            onValueChange = { dailyLimitText = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("Günlük Adet / Porsiyon (Örn: 15)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -749,15 +810,22 @@ private fun MenuManagementTab(
                         val price = priceText.replace(",", ".").toDoubleOrNull()
                         if (name.isNotBlank() && price != null && price > 0) {
                             val current = editingProduct
+                            val limit = if (hasDailyLimit) dailyLimitText.toIntOrNull() ?: 15 else 0
                             if (current == null) {
-                                onAddProduct(catId, name.trim(), price, desc.trim())
+                                onAddProduct(catId, name.trim(), price, desc.trim(), hasDailyLimit, limit)
                             } else {
+                                val newRemaining = if (hasDailyLimit) {
+                                    if (!current.hasDailyLimit || current.dailyLimit != limit) limit else current.remainingStock
+                                } else 0
                                 onUpdateProduct(
                                     current.copy(
                                         categoryId = catId,
                                         name = name.trim(),
                                         price = price,
-                                        description = desc.trim()
+                                        description = desc.trim(),
+                                        hasDailyLimit = hasDailyLimit,
+                                        dailyLimit = limit,
+                                        remainingStock = newRemaining
                                     )
                                 )
                             }
@@ -806,7 +874,11 @@ private fun TableManagementTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp)
+                ) {
                     Text(
                         text = "Masa & Salon Düzeni",
                         fontSize = 17.sp,
@@ -814,9 +886,11 @@ private fun TableManagementTab(
                         color = Slate900
                     )
                     Text(
-                        text = "Yeni masa veya bölge ekleyin, kapasiteleri güncelleyin",
+                        text = "Masa ve salon bölgelerini yönetin",
                         fontSize = 12.sp,
-                        color = Slate500
+                        color = Slate500,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 Button(
@@ -825,15 +899,21 @@ private fun TableManagementTab(
                         showTableModal = true
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Amber600),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Yeni Masa", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Yeni Masa",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        maxLines = 1
+                    )
                 }
             }
         }
@@ -1041,15 +1121,76 @@ private fun TableManagementTab(
 private fun SalesReportTab(
     selectedPeriod: ReportPeriod,
     report: DetailedSalesReport,
-    onSelectPeriod: (ReportPeriod) -> Unit
+    onSelectPeriod: (ReportPeriod) -> Unit,
+    onCloseDay: () -> Unit
 ) {
     val dateFormatter = remember { SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()) }
+    var showCloseDayDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                tint = Amber500,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Günü Kapat & Stokları Yenile",
+                                color = PureWhite,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Z-Raporu devrini yapar, günlük sayılı porsiyonları tazeler.",
+                            color = Slate400,
+                            fontSize = 11.sp
+                        )
+                    }
+                    Button(
+                        onClick = { showCloseDayDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Amber600),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Günü Kapat",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(ReportPeriod.entries) { period ->
@@ -1351,6 +1492,47 @@ private fun SalesReportTab(
                 }
             }
         }
+    }
+
+    if (showCloseDayDialog) {
+        AlertDialog(
+            onDismissRequest = { showCloseDayDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    tint = Amber600,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Günü Kapatmak İstiyor musunuz?",
+                    fontWeight = FontWeight.ExtraBold
+                )
+            },
+            text = {
+                Text(
+                    text = "Bugünkü ciro (₺${"%.2f".format(report.totalRevenue)}) devredilecek, rapor sıfırlanıp yeni güne aktarılacak ve sayılı ürünlerin günlük stok kotaları tazelenecektir."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onCloseDay()
+                        showCloseDayDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber600)
+                ) {
+                    Text("Evet, Günü Kapat")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloseDayDialog = false }) {
+                    Text("Vazgeç")
+                }
+            }
+        )
     }
 }
 

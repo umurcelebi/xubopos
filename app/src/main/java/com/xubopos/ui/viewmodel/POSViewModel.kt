@@ -33,6 +33,9 @@ import com.xubopos.update.UpdateInfo
 import com.xubopos.update.UpdateStatus
 import java.io.File
 import java.net.URI
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -133,6 +136,15 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     init {
         val dao = AppDatabase.getDatabase(application).restaurantDao()
         repository = POSRepository(dao)
+
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val lastReset = prefs.getString("last_stock_reset_date", "")
+        if (lastReset != todayStr) {
+            viewModelScope.launch {
+                repository.resetDailyStockLimits()
+                prefs.edit().putString("last_stock_reset_date", todayStr).apply()
+            }
+        }
 
         allTables = combine(_deviceRole, repository.allTables, _remoteTables) { role, local, remote ->
             if (role == DeviceRole.SERVER) local else remote
@@ -392,8 +404,23 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshDetailedReport(period: ReportPeriod = _selectedReportPeriod.value) {
+        val lastClose = prefs.getLong("last_day_close_time", 0L)
         viewModelScope.launch {
-            _detailedReport.value = repository.getDetailedReport(period)
+            _detailedReport.value = repository.getDetailedReport(period, lastClose)
+        }
+    }
+
+    fun closeDay() {
+        val now = System.currentTimeMillis()
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(now))
+        prefs.edit()
+            .putLong("last_day_close_time", now)
+            .putString("last_stock_reset_date", todayStr)
+            .apply()
+        viewModelScope.launch {
+            repository.resetDailyStockLimits()
+            refreshDetailedReport()
+            _snackbarMessage.value = "Gün başarıyla kapatıldı! Günlük stok kotaları tazelendi ve Z-raporu devredildi."
         }
     }
 
@@ -422,9 +449,17 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         val tableId = _selectedTableId.value ?: return
         val categoryName = allCategories.value.find { it.id == menuItem.categoryId }?.name ?: "Genel"
 
+        if (menuItem.hasDailyLimit && menuItem.remainingStock <= 0) {
+            _snackbarMessage.value = "'${menuItem.name}' için günlük porsiyon tükendi!"
+            return
+        }
+
         if (_deviceRole.value == DeviceRole.SERVER) {
             viewModelScope.launch {
-                repository.addMenuItemToBill(tableId, menuItem, categoryName, note)
+                val ok = repository.addMenuItemToBill(tableId, menuItem, categoryName, note)
+                if (!ok) {
+                    _snackbarMessage.value = "'${menuItem.name}' için günlük porsiyon tükendi!"
+                }
             }
         } else {
             val ticketItem = KitchenTicketItemDto(
@@ -495,7 +530,10 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         val tableId = _selectedTableId.value ?: return
         if (_deviceRole.value == DeviceRole.SERVER) {
             viewModelScope.launch {
-                repository.incrementOrderItem(tableId, item)
+                val ok = repository.incrementOrderItem(tableId, item)
+                if (!ok) {
+                    _snackbarMessage.value = "'${item.itemName}' için günlük porsiyon tükendi!"
+                }
             }
         } else {
             addItemToCurrentTable(
@@ -598,10 +636,17 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addCustomProduct(categoryId: Int, name: String, price: Double, description: String) {
+    fun addCustomProduct(
+        categoryId: Int,
+        name: String,
+        price: Double,
+        description: String,
+        hasDailyLimit: Boolean = false,
+        dailyLimit: Int = 0
+    ) {
         if (_deviceRole.value == DeviceRole.SERVER) {
             viewModelScope.launch {
-                repository.addCustomMenuItem(categoryId, name, price, description)
+                repository.addCustomMenuItem(categoryId, name, price, description, hasDailyLimit, dailyLimit)
                 _snackbarMessage.value = "'$name' menüye eklendi"
             }
         }
