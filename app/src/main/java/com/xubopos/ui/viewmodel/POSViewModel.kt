@@ -49,6 +49,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -171,7 +172,12 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     private var server: LocalPosServer? = null
     private var client: LocalPosClient? = null
     private var clientStatusJob: Job? = null
+    private var autoReconnectJob: Job? = null
     private var nsdHelper: PosNsdHelper? = null
+    private val serverBroadcastJobs = mutableListOf<Job>()
+    private var isStartingServer = false
+    private var isServerRunning = false
+    private var lastConnectAttemptTime = 0L
 
     init {
         val dao = AppDatabase.getDatabase(application).restaurantDao()
@@ -290,14 +296,46 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 if (!knownHost.isNullOrBlank()) {
                     connectClientToHost(knownHost, 8887)
                 }
+                startAutoReconnectLoop()
             }
         }
     }
 
-    private fun startServer() {
+    private fun startServer(retryCount: Int = 0) {
+        if (isStartingServer && retryCount == 0) return
+        isStartingServer = true
+
+        serverBroadcastJobs.forEach { it.cancel() }
+        serverBroadcastJobs.clear()
+
+        try {
+            server?.stop(500)
+        } catch (_: Exception) {}
+        server = null
+
         try {
             server = LocalPosServer(
                 port = 8887,
+                onServerStarted = {
+                    isStartingServer = false
+                    isServerRunning = true
+                    _connectionStatus.value = ConnectionStatus.CONNECTED
+                    nsdHelper?.registerServer(8887)
+                    Log.d("POSViewModel", "LocalPosServer started and registered on port 8887")
+                },
+                onServerError = { ex ->
+                    Log.e("POSViewModel", "Local server error/bind failure: ${ex?.message}, retryCount: $retryCount")
+                    isStartingServer = false
+                    isServerRunning = false
+                    if (retryCount < 5) {
+                        viewModelScope.launch {
+                            delay(1200L)
+                            startServer(retryCount + 1)
+                        }
+                    } else {
+                        _connectionStatus.value = ConnectionStatus.ERROR
+                    }
+                },
                 onClientHandshake = { socket, packet ->
                     viewModelScope.launch {
                         val activeItems = repository.activeOrderItems.firstOrNull() ?: emptyList()
@@ -305,12 +343,17 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                         _isKitchenConnected.value = isKit
                         server?.broadcastKitchenStatus(isKit)
 
+                        val tables = if (allTables.value.isNotEmpty()) allTables.value else repository.allTables.firstOrNull() ?: emptyList()
+                        val categories = if (allCategories.value.isNotEmpty()) allCategories.value else repository.allCategories.firstOrNull() ?: emptyList()
+                        val menuItems = if (allMenuItems.value.isNotEmpty()) allMenuItems.value else repository.allMenuItems.firstOrNull() ?: emptyList()
+                        val tickets = if (activeKitchenTickets.value.isNotEmpty()) activeKitchenTickets.value else repository.activeKitchenTickets.firstOrNull() ?: emptyList()
+
                         val payload = FullSyncPayload(
                             restaurantName = _restaurantName.value,
-                            tables = allTables.value,
-                            categories = allCategories.value,
-                            menuItems = allMenuItems.value,
-                            activeTickets = activeKitchenTickets.value,
+                            tables = tables,
+                            categories = categories,
+                            menuItems = menuItems,
+                            activeTickets = tickets,
                             activeOrderItems = activeItems,
                             tableLocks = _activeTableLocks.value.values.toList(),
                             isKitchenActive = isKit
@@ -431,43 +474,59 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 start()
             }
 
-            _connectionStatus.value = ConnectionStatus.CONNECTED
-            nsdHelper?.registerServer(8887)
-
-            viewModelScope.launch {
-                server?.connectedClientCount?.collect { count ->
-                    _connectedClientCount.value = count
+            serverBroadcastJobs.add(
+                viewModelScope.launch {
+                    server?.connectedClientCount?.collect { count ->
+                        _connectedClientCount.value = count
+                    }
                 }
-            }
+            )
 
-            viewModelScope.launch {
-                repository.allTables.collect { tables ->
-                    server?.broadcastTables(tables)
+            serverBroadcastJobs.add(
+                viewModelScope.launch {
+                    repository.allTables.collect { tables ->
+                        server?.broadcastTables(tables)
+                    }
                 }
-            }
+            )
 
-            viewModelScope.launch {
-                repository.activeKitchenTickets.collect { tickets ->
-                    server?.broadcastTickets(tickets)
+            serverBroadcastJobs.add(
+                viewModelScope.launch {
+                    repository.activeKitchenTickets.collect { tickets ->
+                        server?.broadcastTickets(tickets)
+                    }
                 }
-            }
+            )
 
-            viewModelScope.launch {
-                repository.activeOrderItems.collect { items ->
-                    server?.broadcastActiveItems(items)
+            serverBroadcastJobs.add(
+                viewModelScope.launch {
+                    repository.activeOrderItems.collect { items ->
+                        server?.broadcastActiveItems(items)
+                    }
                 }
-            }
+            )
 
-            viewModelScope.launch {
-                combine(repository.allCategories, repository.allMenuItems, _restaurantName) { cats, items, rName ->
-                    MenuSyncPayload(categories = cats, menuItems = items, restaurantName = rName)
-                }.collect { menuPayload ->
-                    server?.broadcastMenuSync(menuPayload)
+            serverBroadcastJobs.add(
+                viewModelScope.launch {
+                    combine(repository.allCategories, repository.allMenuItems, _restaurantName) { cats, items, rName ->
+                        MenuSyncPayload(categories = cats, menuItems = items, restaurantName = rName)
+                    }.collect { menuPayload ->
+                        server?.broadcastMenuSync(menuPayload)
+                    }
                 }
-            }
+            )
         } catch (e: Exception) {
-            Log.e("POSViewModel", "Failed to start local server", e)
-            _connectionStatus.value = ConnectionStatus.ERROR
+            Log.e("POSViewModel", "Failed to start local server, retryCount: $retryCount", e)
+            isStartingServer = false
+            isServerRunning = false
+            if (retryCount < 5) {
+                viewModelScope.launch {
+                    delay(1200L)
+                    startServer(retryCount + 1)
+                }
+            } else {
+                _connectionStatus.value = ConnectionStatus.ERROR
+            }
         }
     }
 
@@ -484,8 +543,18 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun connectClientToHost(host: String, port: Int = 8887) {
+        val now = System.currentTimeMillis()
+        if (now - lastConnectAttemptTime < 1500L && _connectionStatus.value == ConnectionStatus.CONNECTING) {
+            return
+        }
+        lastConnectAttemptTime = now
+
         try {
-            client?.close()
+            try {
+                client?.close()
+            } catch (_: Exception) {}
+            client = null
+
             _connectionStatus.value = ConnectionStatus.CONNECTING
             _resolvedServerHost.value = host
             prefs.edit().putString("last_server_host", host).apply()
@@ -543,28 +612,54 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             clientStatusJob = viewModelScope.launch {
                 client?.connectionStatus?.collect { status ->
                     _connectionStatus.value = status
-                    if ((status == ConnectionStatus.DISCONNECTED || status == ConnectionStatus.ERROR) &&
-                        (_deviceRole.value == DeviceRole.WAITER || _deviceRole.value == DeviceRole.KITCHEN)
-                    ) {
-                        delay(2000L)
-                        val targetHost = _resolvedServerHost.value ?: prefs.getString("last_server_host", null)
-                        if (!targetHost.isNullOrBlank() &&
-                            _connectionStatus.value != ConnectionStatus.CONNECTED &&
-                            _connectionStatus.value != ConnectionStatus.CONNECTING
-                        ) {
-                            connectClientToHost(targetHost, 8887)
-                        }
-                        if (_connectionStatus.value != ConnectionStatus.CONNECTED &&
-                            _connectionStatus.value != ConnectionStatus.CONNECTING
-                        ) {
-                            startClientDiscovery()
-                        }
-                    }
                 }
             }
         } catch (e: Exception) {
             Log.e("POSViewModel", "Failed to connect client to $host:$port", e)
             _connectionStatus.value = ConnectionStatus.ERROR
+        }
+    }
+
+    private fun startAutoReconnectLoop() {
+        autoReconnectJob?.cancel()
+        autoReconnectJob = viewModelScope.launch {
+            while (isActive) {
+                delay(2000L)
+                val role = _deviceRole.value
+                if (role == DeviceRole.WAITER || role == DeviceRole.KITCHEN) {
+                    val isConnected = client?.isOpen == true && _connectionStatus.value == ConnectionStatus.CONNECTED
+                    val isConnectingRecently = _connectionStatus.value == ConnectionStatus.CONNECTING &&
+                        (System.currentTimeMillis() - lastConnectAttemptTime < 2500L)
+
+                    if (!isConnected && !isConnectingRecently) {
+                        val targetHost = _resolvedServerHost.value ?: prefs.getString("last_server_host", null)
+                        if (!targetHost.isNullOrBlank()) {
+                            connectClientToHost(targetHost, 8887)
+                        }
+                        startClientDiscovery()
+                    }
+                }
+            }
+        }
+    }
+
+    fun onAppResumed() {
+        when (_deviceRole.value) {
+            DeviceRole.SERVER -> {
+                if (!isServerRunning && !isStartingServer) {
+                    startServer()
+                }
+            }
+            DeviceRole.WAITER, DeviceRole.KITCHEN -> {
+                if (client?.isOpen != true || _connectionStatus.value != ConnectionStatus.CONNECTED) {
+                    val host = _resolvedServerHost.value ?: prefs.getString("last_server_host", null)
+                    if (!host.isNullOrBlank()) {
+                        connectClientToHost(host, 8887)
+                    }
+                    startClientDiscovery()
+                    startAutoReconnectLoop()
+                }
+            }
         }
     }
 
@@ -1199,11 +1294,20 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun stopNetworking() {
+        isStartingServer = false
+        isServerRunning = false
+
+        serverBroadcastJobs.forEach { it.cancel() }
+        serverBroadcastJobs.clear()
+
+        autoReconnectJob?.cancel()
+        autoReconnectJob = null
+
         clientStatusJob?.cancel()
         clientStatusJob = null
 
         try {
-            server?.stop()
+            server?.stop(500)
         } catch (_: Exception) {}
         server = null
 

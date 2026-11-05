@@ -28,6 +28,10 @@ class LocalPosClient(
     private val onKitchenReadyAlertReceived: (KitchenReadyAlertPayload) -> Unit = {}
 ) : WebSocketClient(serverUri) {
 
+    init {
+        connectionLostTimeout = 5
+    }
+
     private val gson = Gson()
     private val _connectionStatus = MutableStateFlow(ConnectionStatus.CONNECTING)
     val connectionStatus: StateFlow<ConnectionStatus> = _connectionStatus.asStateFlow()

@@ -224,12 +224,17 @@ class PosNsdHelper(private val context: Context) {
                     broadcast = true
                 }
                 val msg = "XUBOPOS_BEACON:$serverPort".toByteArray(Charsets.UTF_8)
-                val broadcastAddr = InetAddress.getByName("255.255.255.255")
-                val packet = DatagramPacket(msg, msg.size, broadcastAddr, UDP_BEACON_PORT)
+                val generalBroadcast = InetAddress.getByName("255.255.255.255")
 
                 while (isActive) {
                     try {
-                        socket.send(packet)
+                        socket.send(DatagramPacket(msg, msg.size, generalBroadcast, UDP_BEACON_PORT))
+                        val subnetBroadcasts = getAllBroadcastAddresses()
+                        for (broadcastAddr in subnetBroadcasts) {
+                            try {
+                                socket.send(DatagramPacket(msg, msg.size, broadcastAddr, UDP_BEACON_PORT))
+                            } catch (_: Exception) {}
+                        }
                     } catch (_: Exception) {}
                     delay(2000L)
                 }
@@ -283,22 +288,42 @@ class PosNsdHelper(private val context: Context) {
         val myIp = getLocalIpAddress() ?: return
         val prefix = myIp.substringBeforeLast(".") + "."
         helperScope.launch {
-            val jobs = (1..254).map { i ->
-                async {
-                    val testIp = "$prefix$i"
-                    if (testIp != myIp) {
-                        try {
-                            Socket().use { s ->
-                                s.connect(InetSocketAddress(testIp, 8887), 350)
-                                Log.d(TAG, "Server found via Subnet Probe: $testIp:8887")
-                                onServerFound(testIp, 8887)
-                            }
-                        } catch (_: Exception) {}
+            (1..254).chunked(32).forEach { chunk ->
+                if (!isActive) return@launch
+                val jobs = chunk.map { i ->
+                    async {
+                        val testIp = "$prefix$i"
+                        if (testIp != myIp) {
+                            try {
+                                Socket().use { s ->
+                                    s.connect(InetSocketAddress(testIp, 8887), 250)
+                                    Log.d(TAG, "Server found via Subnet Probe: $testIp:8887")
+                                    onServerFound(testIp, 8887)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+                jobs.awaitAll()
+            }
+        }
+    }
+
+    private fun getAllBroadcastAddresses(): List<InetAddress> {
+        val broadcastList = mutableListOf<InetAddress>()
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return broadcastList
+            for (intf in interfaces) {
+                if (!intf.isUp || intf.isLoopback) continue
+                for (intfAddr in intf.interfaceAddresses) {
+                    val broadcast = intfAddr.broadcast
+                    if (broadcast != null && broadcast is Inet4Address) {
+                        broadcastList.add(broadcast)
                     }
                 }
             }
-            jobs.awaitAll()
-        }
+        } catch (_: Exception) {}
+        return broadcastList
     }
 
     private fun getLocalIpAddress(): String? {

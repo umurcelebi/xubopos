@@ -17,6 +17,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 class LocalPosServer(
     port: Int = 8887,
+    private val onServerStarted: () -> Unit = {},
+    private val onServerError: (Exception?) -> Unit = {},
     private val onClientHandshake: (WebSocket, NetworkPacket) -> Unit,
     private val onAddOrderReceived: (AddOrderPayload) -> Unit,
     private val onModifyOrderItemReceived: (ModifyOrderItemPayload) -> Unit = {},
@@ -25,6 +27,11 @@ class LocalPosServer(
     private val onUnlockTableReceived: (TableLockPayload, WebSocket) -> Unit = { _, _ -> },
     private val onClientDisconnected: (WebSocket) -> Unit = {}
 ) : WebSocketServer(InetSocketAddress(port)) {
+
+    init {
+        isReuseAddr = true
+        connectionLostTimeout = 5
+    }
 
     private val gson = Gson()
     private val _connectedClientCount = MutableStateFlow(0)
@@ -38,6 +45,7 @@ class LocalPosServer(
 
     override fun onStart() {
         Log.d(TAG, "LocalPosServer started on port $port")
+        onServerStarted()
     }
 
     override fun onOpen(conn: WebSocket?, handshake: ClientHandshake?) {
@@ -102,7 +110,10 @@ class LocalPosServer(
     override fun onMessage(conn: WebSocket?, message: ByteBuffer?) {}
 
     override fun onError(conn: WebSocket?, ex: Exception?) {
-        Log.e(TAG, "Server socket error", ex)
+        Log.e(TAG, "Server socket error (conn=$conn)", ex)
+        if (conn == null) {
+            onServerError(ex)
+        }
     }
 
     fun isAnyKitchenClientConnected(): Boolean {

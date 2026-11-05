@@ -93,8 +93,10 @@ fun POSApp() {
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                viewModel.onAppBackgrounded()
+            when (event) {
+                Lifecycle.Event.ON_STOP -> viewModel.onAppBackgrounded()
+                Lifecycle.Event.ON_RESUME -> viewModel.onAppResumed()
+                else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
