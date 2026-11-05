@@ -287,13 +287,44 @@ class POSRepository(private val dao: RestaurantDao) {
         dao.updateOrderItem(item.copy(note = newNote))
     }
 
+    suspend fun decrementOrderItemById(tableId: Int, itemId: Long) {
+        val item = dao.getOrderItemById(itemId) ?: return
+        decrementOrderItem(tableId, item)
+    }
+
+    suspend fun removeOrderItemById(tableId: Int, itemId: Long) {
+        val item = dao.getOrderItemById(itemId) ?: return
+        removeOrderItem(tableId, item)
+    }
+
+    suspend fun updateOrderItemNoteById(itemId: Long, newNote: String) {
+        val item = dao.getOrderItemById(itemId) ?: return
+        updateOrderItemNote(item, newNote)
+    }
+
     suspend fun applyDiscountToBill(tableId: Int, discountAmount: Double) {
         val table = dao.getTableById(tableId) ?: return
         val billId = table.currentBillId ?: return
         val bill = dao.getBillById(billId) ?: return
-        val clampedDiscount = discountAmount.coerceIn(0.0, bill.totalAmount)
+        val maxAllowedDiscount = (bill.totalAmount - bill.paidAmount).coerceAtLeast(0.0)
+        val clampedDiscount = discountAmount.coerceIn(0.0, maxAllowedDiscount)
         dao.updateBill(bill.copy(discountAmount = clampedDiscount))
         recalculateBillAndTable(billId, tableId)
+    }
+
+    suspend fun refundPayment(tableId: Int, payment: PaymentRecord) {
+        val table = dao.getTableById(tableId) ?: return
+        val billId = table.currentBillId ?: return
+        val bill = dao.getBillById(billId) ?: return
+        dao.deletePayment(payment)
+        val newPaid = (bill.paidAmount - payment.amount).coerceAtLeast(0.0)
+        dao.updateBill(bill.copy(paidAmount = newPaid))
+        recalculateBillAndTable(billId, tableId)
+    }
+
+    suspend fun togglePaymentMethod(payment: PaymentRecord) {
+        val nextMethod = if (payment.paymentMethod == "NAKİT") "KART" else "NAKİT"
+        dao.updatePayment(payment.copy(paymentMethod = nextMethod))
     }
 
     suspend fun processPayment(
@@ -366,6 +397,20 @@ class POSRepository(private val dao: RestaurantDao) {
         val table = dao.getTableById(tableId) ?: return
         val billId = table.currentBillId
         if (billId != null) {
+            // İptal edilen masadaki ödenmemiş ürünlerin günlük stok kotalarını iade et
+            val currentItems = dao.getOrderItemsForBillSync(billId)
+            for (item in currentItems) {
+                val unpaidQty = (item.quantity - item.paidQuantity).coerceAtLeast(0)
+                if (unpaidQty > 0) {
+                    item.menuItemId?.let { mId ->
+                        dao.getMenuItemById(mId)?.let { m ->
+                            if (m.hasDailyLimit) {
+                                dao.updateRemainingStock(mId, (m.remainingStock + unpaidQty).coerceAtMost(m.dailyLimit))
+                            }
+                        }
+                    }
+                }
+            }
             dao.deleteAllItemsForBill(billId)
             val bill = dao.getBillById(billId)
             if (bill != null) {
@@ -402,6 +447,7 @@ class POSRepository(private val dao: RestaurantDao) {
                     tableName = toTable.name
                 )
             )
+            dao.transferPaymentsToBill(fromBillId, fromBillId, toTable.name)
             dao.updateTable(
                 toTable.copy(
                     isOccupied = true,
@@ -420,6 +466,11 @@ class POSRepository(private val dao: RestaurantDao) {
                     currentPaidAmount = 0.0
                 )
             )
+            // Mutfak fişini yeni masaya taşı
+            val fromTickets = dao.getActiveKitchenTicketsForTable(fromTableId)
+            for (tkt in fromTickets) {
+                dao.updateKitchenTicket(tkt.copy(tableId = toTable.id, tableName = toTable.name))
+            }
         } else {
             val toBillId = toTable.currentBillId
             val toBill = dao.getBillById(toBillId) ?: return
@@ -438,6 +489,7 @@ class POSRepository(private val dao: RestaurantDao) {
                     dao.updateOrderItem(item.copy(billId = toBillId))
                 }
             }
+            dao.transferPaymentsToBill(fromBillId, toBillId, toTable.name)
             dao.updateBill(
                 toBill.copy(
                     paidAmount = toBill.paidAmount + fromBill.paidAmount,
@@ -459,8 +511,103 @@ class POSRepository(private val dao: RestaurantDao) {
                     currentPaidAmount = 0.0
                 )
             )
+            // Eski masanın aktif mutfak fişi varsa yeni masanın ürünleriyle güncelle veya taşı
+            val fromTickets = dao.getActiveKitchenTicketsForTable(fromTableId)
+            val toTickets = dao.getActiveKitchenTicketsForTable(toTable.id)
+            if (fromTickets.isNotEmpty()) {
+                if (toTickets.isEmpty()) {
+                    val primary = fromTickets.first()
+                    dao.updateKitchenTicket(primary.copy(tableId = toTable.id, tableName = toTable.name))
+                    for (extra in fromTickets.drop(1)) {
+                        dao.updateKitchenTicketStatus(extra.ticketId, "COMPLETED")
+                    }
+                } else {
+                    dao.deleteKitchenTicketsForTable(fromTableId)
+                    val mergedItems = dao.getOrderItemsForBillSync(toBillId).map {
+                        KitchenTicketItemDto(
+                            id = it.id,
+                            menuItemId = it.menuItemId,
+                            itemName = it.itemName,
+                            categoryName = it.categoryName,
+                            quantity = it.quantity,
+                            note = it.note
+                        )
+                    }
+                    createKitchenTicket(toTable.id, toTable.name, "Kasa", mergedItems)
+                }
+            }
             recalculateBillAndTable(toBillId, toTable.id)
         }
+    }
+
+    suspend fun transferSelectedItems(
+        fromTableId: Int,
+        toTableId: Int,
+        selectedQuantities: Map<Long, Int>
+    ) {
+        if (fromTableId == toTableId || selectedQuantities.isEmpty()) return
+        val fromTable = dao.getTableById(fromTableId) ?: return
+        val toTable = dao.getTableById(toTableId) ?: return
+        val fromBillId = fromTable.currentBillId ?: return
+
+        val now = System.currentTimeMillis()
+        var toBillId = toTable.currentBillId
+        if (!toTable.isOccupied || toBillId == null) {
+            toBillId = dao.insertBill(
+                OrderBill(
+                    tableId = toTable.id,
+                    tableName = toTable.name,
+                    status = "OPEN",
+                    totalAmount = 0.0,
+                    paidAmount = 0.0,
+                    createdAt = now
+                )
+            )
+            dao.updateTable(
+                toTable.copy(
+                    isOccupied = true,
+                    currentBillId = toBillId,
+                    occupiedSince = now,
+                    currentTotalAmount = 0.0,
+                    currentPaidAmount = 0.0
+                )
+            )
+        }
+
+        val fromItems = dao.getOrderItemsForBillSync(fromBillId)
+        for (item in fromItems) {
+            val moveQty = (selectedQuantities[item.id] ?: 0).coerceIn(0, item.unpaidQuantity)
+            if (moveQty <= 0) continue
+
+            // Hedef masaya ekle
+            val existingInTarget = dao.findExistingOrderItem(toBillId, item.menuItemId, item.note)
+            if (existingInTarget != null) {
+                dao.updateOrderItem(existingInTarget.copy(quantity = existingInTarget.quantity + moveQty))
+            } else {
+                dao.insertOrderItem(
+                    OrderItem(
+                        billId = toBillId,
+                        menuItemId = item.menuItemId,
+                        itemName = item.itemName,
+                        categoryName = item.categoryName,
+                        unitPrice = item.unitPrice,
+                        quantity = moveQty,
+                        note = item.note
+                    )
+                )
+            }
+
+            // Kaynak masadan düş veya sil
+            val remainingQty = item.quantity - moveQty
+            if (remainingQty <= 0) {
+                dao.deleteOrderItem(item)
+            } else {
+                dao.updateOrderItem(item.copy(quantity = remainingQty))
+            }
+        }
+
+        recalculateBillAndTable(fromBillId, fromTableId)
+        recalculateBillAndTable(toBillId, toTableId)
     }
 
     suspend fun addCustomMenuItem(
@@ -510,11 +657,27 @@ class POSRepository(private val dao: RestaurantDao) {
         items: List<KitchenTicketItemDto>
     ): KitchenTicketEntity {
         val existingTickets = dao.getActiveKitchenTicketsForTable(tableId)
-        val itemsJson = Gson().toJson(items)
         val currentTime = System.currentTimeMillis()
 
         if (existingTickets.isNotEmpty()) {
             val primaryTicket = existingTickets.first()
+            val prevItems = primaryTicket.getItems()
+
+            val diffedItems = items.map { newItem ->
+                val matchedPrev = prevItems.find {
+                    (it.id != 0L && it.id == newItem.id) ||
+                        (it.itemName == newItem.itemName && it.note == newItem.note)
+                }
+                if (matchedPrev == null) {
+                    newItem.copy(isNew = true, addedQuantity = newItem.quantity)
+                } else if (newItem.quantity > matchedPrev.quantity) {
+                    newItem.copy(isNew = true, addedQuantity = newItem.quantity - matchedPrev.quantity)
+                } else {
+                    newItem.copy(isNew = false, addedQuantity = 0)
+                }
+            }
+
+            val itemsJson = Gson().toJson(diffedItems)
             val updated = primaryTicket.copy(
                 tableName = tableName,
                 waiterName = waiterName,
@@ -532,6 +695,7 @@ class POSRepository(private val dao: RestaurantDao) {
             }
             return updated
         } else {
+            val itemsJson = Gson().toJson(items)
             val ticketId = "TKT-${(currentTime % 100000)}"
             val entity = KitchenTicketEntity(
                 ticketId = ticketId,
@@ -547,12 +711,39 @@ class POSRepository(private val dao: RestaurantDao) {
         }
     }
 
+    suspend fun getKitchenTicketById(ticketId: String): KitchenTicketEntity? {
+        return dao.getKitchenTicketById(ticketId)
+    }
+
     suspend fun updateKitchenTicketStatus(ticketId: String, status: String) {
         dao.updateKitchenTicketStatus(ticketId, status)
     }
 
     suspend fun deleteKitchenTicketsForTable(tableId: Int) {
         dao.deleteKitchenTicketsForTable(tableId)
+    }
+
+    suspend fun exportMenuJson(): String {
+        val categories = dao.getAllCategoriesSync()
+        val items = dao.getAllMenuItemsSync()
+        val backup = MenuBackupPayload(categories = categories, menuItems = items)
+        return Gson().toJson(backup)
+    }
+
+    suspend fun importMenuJson(json: String): Boolean {
+        return try {
+            val backup = Gson().fromJson(json, MenuBackupPayload::class.java) ?: return false
+            if (backup.categories.isEmpty() && backup.menuItems.isEmpty()) return false
+            if (backup.categories.isNotEmpty()) {
+                dao.insertCategories(backup.categories)
+            }
+            if (backup.menuItems.isNotEmpty()) {
+                dao.insertMenuItems(backup.menuItems)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private suspend fun recalculateBillAndTable(billId: Long, tableId: Int) {
@@ -658,3 +849,8 @@ class POSRepository(private val dao: RestaurantDao) {
         dao.insertMenuItems(menuItems)
     }
 }
+
+data class MenuBackupPayload(
+    val categories: List<MenuCategory> = emptyList(),
+    val menuItems: List<MenuItem> = emptyList()
+)

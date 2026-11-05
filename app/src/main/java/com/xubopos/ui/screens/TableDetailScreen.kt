@@ -488,6 +488,8 @@ fun TableDetailScreen(
             payments = payments,
             onDismiss = { showPaymentDialog = false },
             onApplyDiscount = { disc -> viewModel.applyDiscount(disc) },
+            onRefundPayment = { payment -> viewModel.refundPayment(payment) },
+            onTogglePaymentMethod = { payment -> viewModel.togglePaymentMethod(payment) },
             onProcessPayment = { amount, method, note, closeIfPaid, paidMap ->
                 viewModel.makePayment(
                     amount = amount,
@@ -508,9 +510,15 @@ fun TableDetailScreen(
         TableTransferDialog(
             currentTable = currentTable,
             allTables = allTables,
+            orderItems = orderItems,
             onDismiss = { showTransferDialog = false },
             onSelectTargetTable = { targetId ->
                 viewModel.transferCurrentTable(targetId) {
+                    showTransferDialog = false
+                }
+            },
+            onTransferSelectedItems = { targetId, selectedMap ->
+                viewModel.transferSelectedItemsToTable(targetId, selectedMap) {
                     showTransferDialog = false
                 }
             }

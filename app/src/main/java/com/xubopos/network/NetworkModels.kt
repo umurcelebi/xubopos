@@ -68,7 +68,27 @@ data class AddOrderPayload(
     val tableId: Int,
     val tableName: String,
     val waiterName: String = "Garson",
-    val items: List<KitchenTicketItemDto>
+    val items: List<KitchenTicketItemDto>,
+    val onlySendKitchen: Boolean = false
+)
+
+data class ModifyOrderItemPayload(
+    val tableId: Int,
+    val itemId: Long,
+    val modifyAction: String, // DECREMENT, REMOVE, UPDATE_NOTE
+    val note: String = ""
+)
+
+data class MenuSyncPayload(
+    val categories: List<MenuCategory>,
+    val menuItems: List<MenuItem>,
+    val restaurantName: String
+)
+
+data class KitchenReadyAlertPayload(
+    val ticketId: String,
+    val tableId: Int,
+    val tableName: String
 )
 
 data class UpdateTicketStatusPayload(

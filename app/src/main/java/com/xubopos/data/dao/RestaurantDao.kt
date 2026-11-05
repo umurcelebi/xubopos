@@ -107,8 +107,14 @@ interface RestaurantDao {
     @Query("SELECT * FROM order_items WHERE billId IN (SELECT id FROM order_bills WHERE status = 'OPEN')")
     fun getActiveOrderItems(): Flow<List<OrderItem>>
 
+    @Query("SELECT * FROM menu_categories ORDER BY sortOrder ASC")
+    suspend fun getAllCategoriesSync(): List<MenuCategory>
+
     @Query("SELECT * FROM menu_items")
     suspend fun getAllMenuItemsSync(): List<MenuItem>
+
+    @Query("SELECT * FROM order_items WHERE id = :itemId")
+    suspend fun getOrderItemById(itemId: Long): OrderItem?
 
     @Query("SELECT * FROM order_items WHERE billId = :billId ORDER BY addedAt ASC")
     suspend fun getOrderItemsForBillSync(billId: Long): List<OrderItem>
@@ -131,11 +137,26 @@ interface RestaurantDao {
     @Query("SELECT * FROM payment_records WHERE billId = :billId ORDER BY paidAt DESC")
     fun getPaymentsForBill(billId: Long): Flow<List<PaymentRecord>>
 
+    @Query("SELECT * FROM payment_records WHERE billId = :billId ORDER BY paidAt DESC")
+    suspend fun getPaymentsForBillSync(billId: Long): List<PaymentRecord>
+
     @Query("SELECT * FROM payment_records ORDER BY paidAt DESC LIMIT 50")
     fun getAllRecentPayments(): Flow<List<PaymentRecord>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPayment(payment: PaymentRecord): Long
+
+    @Update
+    suspend fun updatePayment(payment: PaymentRecord)
+
+    @Delete
+    suspend fun deletePayment(payment: PaymentRecord)
+
+    @Query("UPDATE payment_records SET billId = :toBillId, tableName = :toTableName WHERE billId = :fromBillId")
+    suspend fun transferPaymentsToBill(fromBillId: Long, toBillId: Long, toTableName: String)
+
+    @Query("SELECT * FROM kitchen_tickets WHERE ticketId = :ticketId LIMIT 1")
+    suspend fun getKitchenTicketById(ticketId: String): KitchenTicketEntity?
 
     @Query("SELECT itemName, categoryName, SUM(quantity) as totalQty, SUM(unitPrice * quantity) as totalSales FROM order_items GROUP BY menuItemId ORDER BY totalQty DESC LIMIT 8")
     fun getTopSellingItems(): Flow<List<TopSellingItem>>

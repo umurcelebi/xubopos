@@ -19,6 +19,7 @@ class LocalPosServer(
     port: Int = 8887,
     private val onClientHandshake: (WebSocket, NetworkPacket) -> Unit,
     private val onAddOrderReceived: (AddOrderPayload) -> Unit,
+    private val onModifyOrderItemReceived: (ModifyOrderItemPayload) -> Unit = {},
     private val onUpdateTicketReceived: (UpdateTicketStatusPayload) -> Unit,
     private val onLockTableReceived: (TableLockPayload, WebSocket) -> Unit = { _, _ -> },
     private val onUnlockTableReceived: (TableLockPayload, WebSocket) -> Unit = { _, _ -> },
@@ -79,6 +80,10 @@ class LocalPosServer(
                 "ADD_ORDER" -> {
                     val payload = gson.fromJson(packet.payload, AddOrderPayload::class.java)
                     onAddOrderReceived(payload)
+                }
+                "MODIFY_ORDER_ITEM" -> {
+                    val payload = gson.fromJson(packet.payload, ModifyOrderItemPayload::class.java)
+                    onModifyOrderItemReceived(payload)
                 }
                 "UPDATE_TICKET_STATUS" -> {
                     val payload = gson.fromJson(packet.payload, UpdateTicketStatusPayload::class.java)
@@ -165,6 +170,22 @@ class LocalPosServer(
         val packet = NetworkPacket(
             action = "KITCHEN_STATUS",
             payload = isActive.toString()
+        )
+        broadcastPacket(packet)
+    }
+
+    fun broadcastMenuSync(payload: MenuSyncPayload) {
+        val packet = NetworkPacket(
+            action = "MENU_SYNC",
+            payload = gson.toJson(payload)
+        )
+        broadcastPacket(packet)
+    }
+
+    fun broadcastKitchenReadyAlert(payload: KitchenReadyAlertPayload) {
+        val packet = NetworkPacket(
+            action = "KITCHEN_READY_ALERT",
+            payload = gson.toJson(payload)
         )
         broadcastPacket(packet)
     }

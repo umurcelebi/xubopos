@@ -23,24 +23,31 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.RestaurantMenu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TableRestaurant
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -53,6 +60,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,6 +73,7 @@ import com.xubopos.ui.theme.Amber500
 import com.xubopos.ui.theme.Amber600
 import com.xubopos.ui.theme.Emerald500
 import com.xubopos.ui.theme.PureWhite
+import com.xubopos.ui.theme.Rose600
 import com.xubopos.ui.theme.Sky500
 import com.xubopos.ui.theme.Sky700
 import com.xubopos.ui.theme.Slate100
@@ -98,10 +108,13 @@ fun TablesScreen(
     val resolvedServerHost by viewModel.resolvedServerHost.collectAsState()
     val activeTickets by viewModel.activeKitchenTickets.collectAsState()
     val activeTableLocks by viewModel.activeTableLocks.collectAsState()
+    val managementPin by viewModel.managementPin.collectAsState()
     val myDeviceId = viewModel.deviceId
 
     var showReportDialog by remember { mutableStateOf(false) }
     var showMenuDialog by remember { mutableStateOf(false) }
+    var showPinPromptDialog by remember { mutableStateOf(false) }
+    var lockedTableToTakeOver by remember { mutableStateOf<Pair<RestaurantTable, String>?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(snackbarMessage) {
@@ -252,7 +265,13 @@ fun TablesScreen(
 
                             if (deviceRole == DeviceRole.SERVER) {
                                 FilledTonalButton(
-                                    onClick = onNavigateManagement,
+                                    onClick = {
+                                        if (managementPin.isNotBlank()) {
+                                            showPinPromptDialog = true
+                                        } else {
+                                            onNavigateManagement()
+                                        }
+                                    },
                                     colors = ButtonDefaults.filledTonalButtonColors(
                                         containerColor = Slate800,
                                         contentColor = PureWhite
@@ -262,7 +281,7 @@ fun TablesScreen(
                                     contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Settings,
+                                        imageVector = if (managementPin.isNotBlank()) Icons.Default.Lock else Icons.Default.Settings,
                                         contentDescription = "Yönetim",
                                         modifier = Modifier.size(15.dp)
                                     )
@@ -397,12 +416,136 @@ fun TablesScreen(
                         TableCard(
                             table = table,
                             lockedBy = lockedByOther,
-                            onClick = { onTableClick(table) }
+                            onClick = {
+                                if (lockedByOther != null) {
+                                    lockedTableToTakeOver = table to lockedByOther
+                                } else {
+                                    onTableClick(table)
+                                }
+                            }
                         )
                     }
                 }
             }
         }
+    }
+
+    lockedTableToTakeOver?.let { (lockedTable, lockerDeviceName) ->
+        AlertDialog(
+            onDismissRequest = { lockedTableToTakeOver = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.LockOpen,
+                    contentDescription = null,
+                    tint = Amber600,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Masa Başka Cihazda Açık",
+                    fontWeight = FontWeight.ExtraBold
+                )
+            },
+            text = {
+                Text(
+                    text = "${lockedTable.name} şu anda \"$lockerDeviceName\" cihazında işlem görüyor. Diğer cihazın kilidini devralıp masaya girmek istiyor musunuz?",
+                    fontSize = 13.sp,
+                    color = Slate700
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        lockedTableToTakeOver = null
+                        viewModel.forceSelectTable(lockedTable.id)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber600)
+                ) {
+                    Text("Kilidi Devral ve Gir", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { lockedTableToTakeOver = null }) {
+                    Text("Vazgeç")
+                }
+            }
+        )
+    }
+
+    if (showPinPromptDialog) {
+        var enteredPin by remember { mutableStateOf("") }
+        var pinError by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { showPinPromptDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = Amber600,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Yönetici PIN Girişi",
+                    fontWeight = FontWeight.ExtraBold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Yönetim paneline erişmek için 4 haneli yönetici şifresini girin.",
+                        fontSize = 13.sp,
+                        color = Slate700
+                    )
+                    OutlinedTextField(
+                        value = enteredPin,
+                        onValueChange = {
+                            if (it.length <= 4 && it.all { ch -> ch.isDigit() }) {
+                                enteredPin = it
+                                pinError = false
+                            }
+                        },
+                        label = { Text("4 Haneli PIN") },
+                        singleLine = true,
+                        isError = pinError,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (pinError) {
+                        Text(
+                            text = "Hatalı PIN kodu! Lütfen tekrar deneyin.",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Rose600
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (enteredPin == managementPin) {
+                            showPinPromptDialog = false
+                            onNavigateManagement()
+                        } else {
+                            pinError = true
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate900)
+                ) {
+                    Text("Giriş Yap", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPinPromptDialog = false }) {
+                    Text("Vazgeç")
+                }
+            }
+        )
     }
 
     if (showReportDialog) {

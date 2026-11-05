@@ -2,6 +2,8 @@ package com.xubopos.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -24,8 +26,11 @@ import com.xubopos.network.AddOrderPayload
 import com.xubopos.network.ConnectionStatus
 import com.xubopos.network.DeviceRole
 import com.xubopos.network.FullSyncPayload
+import com.xubopos.network.KitchenReadyAlertPayload
 import com.xubopos.network.LocalPosClient
 import com.xubopos.network.LocalPosServer
+import com.xubopos.network.MenuSyncPayload
+import com.xubopos.network.ModifyOrderItemPayload
 import com.xubopos.network.NetworkPacket
 import android.provider.Settings
 import com.xubopos.network.PosNsdHelper
@@ -158,6 +163,9 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     private val _isKitchenConnected = MutableStateFlow(false)
     val isKitchenConnected: StateFlow<Boolean> = _isKitchenConnected.asStateFlow()
 
+    private val _managementPin = MutableStateFlow(prefs.getString("management_pin", "") ?: "")
+    val managementPin: StateFlow<String> = _managementPin.asStateFlow()
+
     private val serverClientTableLocks = ConcurrentHashMap<org.java_websocket.WebSocket, MutableSet<Int>>()
 
     private var server: LocalPosServer? = null
@@ -229,14 +237,17 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-        currentOrderItems = combine(selectedTable, _deviceRole, _remoteActiveItems) { table, role, remoteItems ->
-            val billId = table?.currentBillId
+        currentOrderItems = combine(selectedTable, _deviceRole) { table, role ->
+            Pair(table?.currentBillId, role)
+        }.flatMapLatest { (billId, role) ->
             if (billId == null) {
-                emptyList()
+                flowOf(emptyList())
             } else if (role == DeviceRole.SERVER) {
-                repository.getOrderItemsForBill(billId).firstOrNull() ?: emptyList()
+                repository.getOrderItemsForBill(billId)
             } else {
-                remoteItems.filter { it.billId == billId }
+                combine(_remoteActiveItems, flowOf(billId)) { remoteItems, id ->
+                    remoteItems.filter { it.billId == id }
+                }
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -315,17 +326,20 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 },
                 onAddOrderReceived = { addOrderPayload ->
                     viewModelScope.launch {
-                        val menuItemsList = repository.getAllMenuItemsSync()
-                        for (item in addOrderPayload.items) {
-                            val matchedItem = menuItemsList.find { it.name == item.itemName }
-                                ?: MenuItem(name = item.itemName, price = 0.0, categoryId = 1)
-                            for (q in 1..item.quantity) {
-                                repository.addMenuItemToBill(
-                                    tableId = addOrderPayload.tableId,
-                                    menuItem = matchedItem,
-                                    categoryName = item.categoryName,
-                                    note = item.note
-                                )
+                        if (!addOrderPayload.onlySendKitchen) {
+                            val menuItemsList = repository.getAllMenuItemsSync()
+                            for (item in addOrderPayload.items) {
+                                val matchedItem = menuItemsList.find {
+                                    (item.menuItemId != 0 && it.id == item.menuItemId) || it.name == item.itemName
+                                } ?: MenuItem(name = item.itemName, price = 0.0, categoryId = 1)
+                                for (q in 1..item.quantity) {
+                                    repository.addMenuItemToBill(
+                                        tableId = addOrderPayload.tableId,
+                                        menuItem = matchedItem,
+                                        categoryName = item.categoryName,
+                                        note = item.note
+                                    )
+                                }
                             }
                         }
                         val activeItems = repository.getActiveOrderItemsForTable(addOrderPayload.tableId)
@@ -333,6 +347,7 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                             activeItems.map {
                                 KitchenTicketItemDto(
                                     id = it.id,
+                                    menuItemId = it.menuItemId,
                                     itemName = it.itemName,
                                     categoryName = it.categoryName,
                                     quantity = it.quantity,
@@ -352,9 +367,31 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                         _snackbarMessage.value = "${addOrderPayload.tableName} için yeni sipariş alındı"
                     }
                 },
+                onModifyOrderItemReceived = { modPayload ->
+                    viewModelScope.launch {
+                        when (modPayload.modifyAction) {
+                            "DECREMENT" -> repository.decrementOrderItemById(modPayload.tableId, modPayload.itemId)
+                            "REMOVE" -> repository.removeOrderItemById(modPayload.tableId, modPayload.itemId)
+                            "UPDATE_NOTE" -> repository.updateOrderItemNoteById(modPayload.itemId, modPayload.note)
+                        }
+                    }
+                },
                 onUpdateTicketReceived = { updatePayload ->
                     viewModelScope.launch {
                         repository.updateKitchenTicketStatus(updatePayload.ticketId, updatePayload.status)
+                        if (updatePayload.status == "READY") {
+                            val ticket = repository.getKitchenTicketById(updatePayload.ticketId)
+                            if (ticket != null) {
+                                val alert = KitchenReadyAlertPayload(
+                                    ticketId = ticket.ticketId,
+                                    tableId = ticket.tableId,
+                                    tableName = ticket.tableName
+                                )
+                                server?.broadcastKitchenReadyAlert(alert)
+                                playReadyChime()
+                                _snackbarMessage.value = "🔔 ${ticket.tableName} siparişi mutfakta HAZIR!"
+                            }
+                        }
                     }
                 },
                 onLockTableReceived = { payload, socket ->
@@ -417,6 +454,14 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                     server?.broadcastActiveItems(items)
                 }
             }
+
+            viewModelScope.launch {
+                combine(repository.allCategories, repository.allMenuItems, _restaurantName) { cats, items, rName ->
+                    MenuSyncPayload(categories = cats, menuItems = items, restaurantName = rName)
+                }.collect { menuPayload ->
+                    server?.broadcastMenuSync(menuPayload)
+                }
+            }
         } catch (e: Exception) {
             Log.e("POSViewModel", "Failed to start local server", e)
             _connectionStatus.value = ConnectionStatus.ERROR
@@ -473,6 +518,19 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 },
                 onKitchenStatusUpdateReceived = { isKit ->
                     _isKitchenConnected.value = isKit
+                },
+                onMenuSyncReceived = { menuSync ->
+                    _remoteCategories.value = menuSync.categories
+                    _remoteMenuItems.value = menuSync.menuItems
+                    if (menuSync.restaurantName.isNotBlank()) {
+                        _restaurantName.value = menuSync.restaurantName
+                    }
+                },
+                onKitchenReadyAlertReceived = { alert ->
+                    if (_deviceRole.value != DeviceRole.KITCHEN) {
+                        playReadyChime()
+                        _snackbarMessage.value = "🔔 ${alert.tableName} siparişi mutfakta HAZIR!"
+                    }
                 }
             ).apply {
                 connect()
@@ -585,6 +643,21 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
+    fun forceSelectTable(tableId: Int) {
+        acquireTableLock(tableId)
+        _selectedTableId.value = tableId
+        _menuSearchQuery.value = ""
+        _snackbarMessage.value = "Masa kilidi devralındı"
+    }
+
+    fun onAppBackgrounded() {
+        val currentId = _selectedTableId.value
+        if (currentId != null) {
+            releaseTableLock(currentId)
+            _selectedTableId.value = null
+        }
+    }
+
     fun acquireTableLock(tableId: Int) {
         val entry = TableLockEntry(tableId = tableId, deviceId = deviceId, deviceName = deviceName)
         val updated = _activeTableLocks.value.toMutableMap()
@@ -641,6 +714,7 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             }
         } else {
             val ticketItem = KitchenTicketItemDto(
+                menuItemId = menuItem.id,
                 itemName = menuItem.name,
                 categoryName = categoryName,
                 quantity = 1,
@@ -650,7 +724,8 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 tableId = tableId,
                 tableName = selectedTable.value?.name ?: "Masa $tableId",
                 waiterName = "Garson",
-                items = listOf(ticketItem)
+                items = listOf(ticketItem),
+                onlySendKitchen = false
             )
             client?.sendAddOrder(payload)
             _snackbarMessage.value = "'${menuItem.name}' mutfağa ve masaya eklendi"
@@ -670,6 +745,7 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 val dtoList = items.map {
                     KitchenTicketItemDto(
                         id = it.id,
+                        menuItemId = it.menuItemId,
                         itemName = it.itemName,
                         categoryName = it.categoryName,
                         quantity = it.quantity,
@@ -688,7 +764,8 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                         tableId = table.id,
                         tableName = table.name,
                         waiterName = "Garson",
-                        items = dtoList
+                        items = dtoList,
+                        onlySendKitchen = true
                     )
                     client?.sendAddOrder(payload)
                 }
@@ -701,9 +778,35 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         if (_deviceRole.value == DeviceRole.SERVER) {
             viewModelScope.launch {
                 repository.updateKitchenTicketStatus(ticketId, status)
+                if (status == "READY") {
+                    val ticket = repository.getKitchenTicketById(ticketId)
+                    if (ticket != null) {
+                        val alert = KitchenReadyAlertPayload(
+                            ticketId = ticket.ticketId,
+                            tableId = ticket.tableId,
+                            tableName = ticket.tableName
+                        )
+                        server?.broadcastKitchenReadyAlert(alert)
+                        playReadyChime()
+                        _snackbarMessage.value = "🔔 ${ticket.tableName} siparişi mutfakta HAZIR!"
+                    }
+                }
             }
         } else {
             client?.sendUpdateTicketStatus(ticketId, status)
+        }
+    }
+
+    private fun playReadyChime() {
+        viewModelScope.launch {
+            try {
+                val toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100)
+                toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 300)
+                delay(320L)
+                toneGen.startTone(ToneGenerator.TONE_PROP_PROMPT, 400)
+                delay(450L)
+                toneGen.release()
+            } catch (_: Exception) {}
         }
     }
 
@@ -717,10 +820,9 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         } else {
-            addItemToCurrentTable(
-                MenuItem(name = item.itemName, price = item.unitPrice, categoryId = 1),
-                item.note
-            )
+            val matchedMenu = allMenuItems.value.find { it.id == item.menuItemId }
+                ?: MenuItem(id = item.menuItemId, name = item.itemName, price = item.unitPrice, categoryId = 1)
+            addItemToCurrentTable(matchedMenu, item.note)
         }
     }
 
@@ -730,6 +832,14 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 repository.decrementOrderItem(tableId, item)
             }
+        } else {
+            client?.sendModifyOrderItem(
+                ModifyOrderItemPayload(
+                    tableId = tableId,
+                    itemId = item.id,
+                    modifyAction = "DECREMENT"
+                )
+            )
         }
     }
 
@@ -739,14 +849,32 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 repository.removeOrderItem(tableId, item)
             }
+        } else {
+            client?.sendModifyOrderItem(
+                ModifyOrderItemPayload(
+                    tableId = tableId,
+                    itemId = item.id,
+                    modifyAction = "REMOVE"
+                )
+            )
         }
     }
 
     fun updateItemNote(item: OrderItem, note: String) {
+        val tableId = _selectedTableId.value ?: 0
         if (_deviceRole.value == DeviceRole.SERVER) {
             viewModelScope.launch {
                 repository.updateOrderItemNote(item, note)
             }
+        } else {
+            client?.sendModifyOrderItem(
+                ModifyOrderItemPayload(
+                    tableId = tableId,
+                    itemId = item.id,
+                    modifyAction = "UPDATE_NOTE",
+                    note = note
+                )
+            )
         }
     }
 
@@ -794,6 +922,28 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refundPayment(payment: PaymentRecord) {
+        val tableId = _selectedTableId.value ?: return
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.refundPayment(tableId, payment)
+                refreshDetailedReport()
+                _snackbarMessage.value = "₺${"%.2f".format(payment.amount)} tutarındaki ara ödeme geri alındı"
+            }
+        }
+    }
+
+    fun togglePaymentMethod(payment: PaymentRecord) {
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.togglePaymentMethod(payment)
+                refreshDetailedReport()
+                val nextMethod = if (payment.paymentMethod == "NAKİT") "KART" else "NAKİT"
+                _snackbarMessage.value = "Ödeme yöntemi '$nextMethod' olarak değiştirildi"
+            }
+        }
+    }
+
     fun cancelTableOrder(onComplete: () -> Unit = {}) {
         val tableId = _selectedTableId.value ?: return
         if (_deviceRole.value == DeviceRole.SERVER) {
@@ -817,6 +967,50 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedTableId.value = targetTableId
                 _snackbarMessage.value = "Masa başarıyla aktarıldı"
                 onComplete()
+            }
+        }
+    }
+
+    fun transferSelectedItemsToTable(
+        targetTableId: Int,
+        selectedQuantities: Map<Long, Int>,
+        onComplete: () -> Unit = {}
+    ) {
+        val fromId = _selectedTableId.value ?: return
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            viewModelScope.launch {
+                repository.transferSelectedItems(fromId, targetTableId, selectedQuantities)
+                _snackbarMessage.value = "Seçilen ürünler diğer masaya aktarıldı"
+                onComplete()
+            }
+        }
+    }
+
+    fun setManagementPin(pin: String) {
+        val cleanPin = pin.trim()
+        prefs.edit().putString("management_pin", cleanPin).apply()
+        _managementPin.value = cleanPin
+        _snackbarMessage.value = if (cleanPin.isEmpty()) {
+            "Yönetim paneli PIN kilidi kaldırıldı"
+        } else {
+            "Yönetim paneli PIN kodu güncellendi"
+        }
+    }
+
+    fun exportMenuBackup(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val json = repository.exportMenuJson()
+            onResult(json)
+        }
+    }
+
+    fun importMenuBackup(json: String) {
+        viewModelScope.launch {
+            val ok = repository.importMenuJson(json)
+            if (ok) {
+                _snackbarMessage.value = "Menü yedeği başarıyla geri yüklendi!"
+            } else {
+                _snackbarMessage.value = "Geçersiz yedek formatı!"
             }
         }
     }

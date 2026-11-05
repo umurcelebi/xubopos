@@ -687,13 +687,32 @@ private fun KitchenTicketCard(
                             }
 
                             Column {
-                                Text(
-                                    text = item.itemName,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isChecked) Slate400 else Slate900,
-                                    textDecoration = if (isChecked) TextDecoration.LineThrough else null
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = item.itemName,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isChecked) Slate400 else Slate900,
+                                        textDecoration = if (isChecked) TextDecoration.LineThrough else null
+                                    )
+                                    if (item.isNew) {
+                                        Surface(
+                                            shape = RoundedCornerShape(5.dp),
+                                            color = Emerald500
+                                        ) {
+                                            Text(
+                                                text = if (item.addedQuantity > 0) "YENİ +${item.addedQuantity}" else "YENİ",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = PureWhite,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)

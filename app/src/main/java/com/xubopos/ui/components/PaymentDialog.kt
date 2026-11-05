@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Discount
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -40,7 +42,9 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -87,18 +91,60 @@ fun PaymentDialog(
     payments: List<PaymentRecord>,
     onDismiss: () -> Unit,
     onApplyDiscount: (Double) -> Unit,
-    onProcessPayment: (Double, String, String, Boolean, Map<Long, Int>) -> Unit
+    onProcessPayment: (Double, String, String, Boolean, Map<Long, Int>) -> Unit,
+    onRefundPayment: (PaymentRecord) -> Unit = {},
+    onTogglePaymentMethod: (PaymentRecord) -> Unit = {}
 ) {
     val remaining = bill.remainingAmount
     var selectedTab by remember { mutableIntStateOf(0) }
     var customAmountText by remember(remaining) {
         mutableStateOf("%.2f".format(remaining).replace(",", "."))
     }
-    var splitCount by remember { mutableIntStateOf(2) }
+
+    val splitNoteRegex = remember { Regex("""(\d+)/(\d+)\s+Kişi Başı Ödeme""") }
+    val lastSplitPayment = remember(payments) {
+        payments.lastOrNull { splitNoteRegex.containsMatchIn(it.note) }
+    }
+    val splitMatch = remember(lastSplitPayment) {
+        lastSplitPayment?.let { splitNoteRegex.find(it.note) }
+    }
+    val initialLastIndex = splitMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+    val initialLastTotal = splitMatch?.groupValues?.get(2)?.toIntOrNull() ?: 0
+
+    val hasOngoingSplit = initialLastIndex in 1 until initialLastTotal && remaining > 0.01
+
+    val initialSplitPaidSum = if (hasOngoingSplit) {
+        payments.takeLast(initialLastIndex)
+            .filter { it.note.contains("/$initialLastTotal") }
+            .sumOf { it.amount }
+    } else 0.0
+
+    var splitCount by remember { mutableIntStateOf(if (hasOngoingSplit) initialLastTotal else 2) }
+    var splitBaseAmount by remember { mutableDoubleStateOf(if (hasOngoingSplit) (remaining + initialSplitPaidSum) else remaining) }
+    var paidInThisSplit by remember { mutableIntStateOf(if (hasOngoingSplit) initialLastIndex else 0) }
+
+    LaunchedEffect(bill.discountAmount) {
+        if (paidInThisSplit == 0) {
+            splitBaseAmount = bill.remainingAmount
+        }
+    }
+
+    val peopleRemaining = (splitCount - paidInThisSplit).coerceAtLeast(1)
+    val currentPersonIndex = (paidInThisSplit + 1).coerceAtMost(splitCount)
+    val perPersonShareRaw = if (splitCount > 0) splitBaseAmount / splitCount else remaining
+    val perPersonShare = (kotlin.math.round(perPersonShareRaw * 100.0) / 100.0).coerceAtLeast(0.01)
+
+    val splitAmountToPay = if (peopleRemaining <= 1 || remaining <= perPersonShare * 1.05) {
+        remaining
+    } else {
+        perPersonShare.coerceAtMost(remaining)
+    }
+
     var discountInput by remember {
         mutableStateOf(if (bill.discountAmount > 0) "%.0f".format(bill.discountAmount) else "")
     }
     var showDiscountRow by remember { mutableStateOf(false) }
+    var showPaymentsHistory by remember { mutableStateOf(false) }
 
     val selectedItemCounts = remember { mutableStateMapOf<Long, Int>() }
     val selectedItemsTotal = orderItems.sumOf { item ->
@@ -109,7 +155,7 @@ fun PaymentDialog(
     val amountToPay = when (selectedTab) {
         0 -> remaining
         1 -> selectedItemsTotal.coerceAtMost(remaining)
-        2 -> (remaining / splitCount).coerceAtMost(remaining)
+        2 -> splitAmountToPay
         else -> (customAmountText.replace(",", ".").toDoubleOrNull() ?: 0.0).coerceAtMost(remaining)
     }
 
@@ -243,12 +289,95 @@ fun PaymentDialog(
                         }
                     )
                     if (payments.isNotEmpty()) {
-                        Text(
-                            text = "${payments.size} ara ödeme alındı",
-                            fontSize = 12.sp,
-                            color = Sky700,
-                            fontWeight = FontWeight.SemiBold
+                        FilterChip(
+                            selected = showPaymentsHistory,
+                            onClick = { showPaymentsHistory = !showPaymentsHistory },
+                            label = {
+                                Text(
+                                    text = "${payments.size} ara ödeme (Düzenle)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         )
+                    }
+                }
+
+                if (showPaymentsHistory && payments.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Slate100,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Alınan Ara Ödemeler:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate700
+                            )
+                            payments.forEach { p ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "₺${"%.2f".format(p.amount)} • ${p.paymentMethod}",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Slate900
+                                        )
+                                        if (p.note.isNotBlank()) {
+                                            Text(
+                                                text = p.note,
+                                                fontSize = 11.sp,
+                                                color = Slate500
+                                            )
+                                        }
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        OutlinedButton(
+                                            onClick = { onTogglePaymentMethod(p) },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.SwapHoriz,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = if (p.paymentMethod == "NAKİT") "Kart Yap" else "Nakit Yap",
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                onRefundPayment(p)
+                                                if (paidInThisSplit > 0) paidInThisSplit--
+                                            },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Undo,
+                                                contentDescription = null,
+                                                tint = Rose600,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Geri Al", fontSize = 11.sp, color = Rose600)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -486,9 +615,14 @@ fun PaymentDialog(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = "Kalan tutarı kaç kişiye bölmek istiyorsunuz?",
+                                    text = if (paidInThisSplit > 0) {
+                                        "Toplam $splitCount kişiye bölündü ($paidInThisSplit kişi ödedi)"
+                                    } else {
+                                        "Kalan tutarı kaç kişiye bölmek istiyorsunuz?"
+                                    },
                                     fontSize = 13.sp,
-                                    color = Slate700
+                                    color = Slate700,
+                                    fontWeight = FontWeight.Medium
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Row(
@@ -498,7 +632,11 @@ fun PaymentDialog(
                                     listOf(2, 3, 4, 5, 6).forEach { count ->
                                         FilterChip(
                                             selected = splitCount == count,
-                                            onClick = { splitCount = count },
+                                            onClick = {
+                                                splitCount = count
+                                                splitBaseAmount = remaining
+                                                paidInThisSplit = 0
+                                            },
                                             label = {
                                                 Text(
                                                     text = "$count Kişi",
@@ -514,11 +652,27 @@ fun PaymentDialog(
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = "Kişi Başı: ₺${"%.2f".format(remaining / splitCount)}",
+                                    text = "Kişi Başı: ₺${"%.2f".format(perPersonShare)}",
                                     fontSize = 22.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Sky700
                                 )
+                                if (paidInThisSplit > 0) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = Emerald50,
+                                        border = BorderStroke(1.dp, Emerald100)
+                                    ) {
+                                        Text(
+                                            text = "$paidInThisSplit/$splitCount kişi ödendi • Sıradaki: $currentPersonIndex. Kişi (Kalan: ₺${"%.2f".format(remaining)})",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Emerald700,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -566,7 +720,11 @@ fun PaymentDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Şu An Tahsil Edilecek:",
+                        text = if (selectedTab == 2) {
+                            "Şu An Tahsil Edilecek ($currentPersonIndex. Kişi):"
+                        } else {
+                            "Şu An Tahsil Edilecek:"
+                        },
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Slate700
@@ -585,7 +743,7 @@ fun PaymentDialog(
 
                 val paymentNote = when (selectedTab) {
                     1 -> "Ürün Bazlı Ödeme"
-                    2 -> "1/$splitCount Kişi Başı Ödeme"
+                    2 -> "$currentPersonIndex/$splitCount Kişi Başı Ödeme"
                     3 -> "Kısmi Tahsilat"
                     else -> "Tam Kapama"
                 }
@@ -603,6 +761,9 @@ fun PaymentDialog(
                                     selectedItemCounts.filterValues { it > 0 }.toMap()
                                 } else {
                                     emptyMap()
+                                }
+                                if (selectedTab == 2) {
+                                    paidInThisSplit++
                                 }
                                 onProcessPayment(amountToPay, "NAKİT", paymentNote, true, paidMap)
                                 selectedItemCounts.clear()
@@ -637,6 +798,9 @@ fun PaymentDialog(
                                     selectedItemCounts.filterValues { it > 0 }.toMap()
                                 } else {
                                     emptyMap()
+                                }
+                                if (selectedTab == 2) {
+                                    paidInThisSplit++
                                 }
                                 onProcessPayment(amountToPay, "KART", paymentNote, true, paidMap)
                                 selectedItemCounts.clear()

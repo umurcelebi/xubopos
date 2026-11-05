@@ -23,7 +23,9 @@ class LocalPosClient(
     private val onKitchenTicketsUpdateReceived: (List<KitchenTicketEntity>) -> Unit,
     private val onActiveItemsUpdateReceived: (List<OrderItem>) -> Unit = {},
     private val onTableLocksUpdateReceived: (List<TableLockEntry>) -> Unit = {},
-    private val onKitchenStatusUpdateReceived: (Boolean) -> Unit = {}
+    private val onKitchenStatusUpdateReceived: (Boolean) -> Unit = {},
+    private val onMenuSyncReceived: (MenuSyncPayload) -> Unit = {},
+    private val onKitchenReadyAlertReceived: (KitchenReadyAlertPayload) -> Unit = {}
 ) : WebSocketClient(serverUri) {
 
     private val gson = Gson()
@@ -80,6 +82,18 @@ class LocalPosClient(
                     val isKitchenActive = packet.payload.toBoolean()
                     onKitchenStatusUpdateReceived(isKitchenActive)
                 }
+                "MENU_SYNC" -> {
+                    val payload = gson.fromJson(packet.payload, MenuSyncPayload::class.java)
+                    if (payload != null) {
+                        onMenuSyncReceived(payload)
+                    }
+                }
+                "KITCHEN_READY_ALERT" -> {
+                    val payload = gson.fromJson(packet.payload, KitchenReadyAlertPayload::class.java)
+                    if (payload != null) {
+                        onKitchenReadyAlertReceived(payload)
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing server message", e)
@@ -100,6 +114,17 @@ class LocalPosClient(
         if (!isOpen) return
         val packet = NetworkPacket(
             action = "ADD_ORDER",
+            role = role.name,
+            senderName = deviceName,
+            payload = gson.toJson(payload)
+        )
+        send(gson.toJson(packet))
+    }
+
+    fun sendModifyOrderItem(payload: ModifyOrderItemPayload) {
+        if (!isOpen) return
+        val packet = NetworkPacket(
+            action = "MODIFY_ORDER_ITEM",
             role = role.name,
             senderName = deviceName,
             payload = gson.toJson(payload)

@@ -19,4 +19,7 @@ data class OrderItem(
 ) {
     val subtotal: Double
         get() = unitPrice * quantity
+
+    val unpaidQuantity: Int
+        get() = (quantity - paidQuantity).coerceAtLeast(0)
 }

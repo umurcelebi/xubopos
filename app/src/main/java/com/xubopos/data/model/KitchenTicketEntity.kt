@@ -28,9 +28,12 @@ data class KitchenTicketEntity(
 
 data class KitchenTicketItemDto(
     val id: Long = 0L,
+    val menuItemId: Int = 0,
     val itemName: String,
     val categoryName: String = "",
     val quantity: Int = 1,
     val note: String = "",
-    val status: String = "PENDING"
+    val status: String = "PENDING",
+    val isNew: Boolean = false,
+    val addedQuantity: Int = 0
 )
