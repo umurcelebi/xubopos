@@ -1,6 +1,13 @@
 package com.xubopos.ui.screens
 
 import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.xubopos.data.repository.BackupSummary
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -41,12 +48,15 @@ import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestaurantMenu
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.TableRestaurant
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -127,9 +137,6 @@ import com.xubopos.ui.theme.Slate700
 import com.xubopos.ui.theme.Slate800
 import com.xubopos.ui.theme.Slate900
 import com.xubopos.ui.viewmodel.POSViewModel
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun ManagementScreen(
@@ -337,27 +344,43 @@ fun ManagementScreen(
                     onCloseDay = viewModel::closeDay
                 )
 
-                3 -> RestaurantSettingsTab(
-                    currentName = restaurantName,
-                    currentPin = managementPin,
-                    onSave = { name ->
-                        viewModel.updateRestaurantInfo(name)
-                    },
-                    onSavePin = { pin ->
-                        viewModel.setManagementPin(pin)
-                    },
-                    onExportMenu = { onReady ->
-                        viewModel.exportMenuBackup(onReady)
-                    },
-                    onImportMenu = { json ->
-                        viewModel.importMenuBackup(json)
-                    },
-                    onOpenRoleSettings = onOpenRoleSettings,
-                    updateStatus = updateStatus,
-                    onCheckForUpdates = { viewModel.checkForUpdates(BuildConfig.VERSION_NAME) },
-                    onDownloadAndInstall = { url -> viewModel.downloadAndInstallUpdate(context, url) },
-                    onInstallDownloadedApk = { file -> viewModel.installDownloadedApk(context, file) }
-                )
+                3 -> {
+                    val pendingRestoreSummary by viewModel.pendingRestoreSummary.collectAsState()
+                    RestaurantSettingsTab(
+                        currentName = restaurantName,
+                        currentPin = managementPin,
+                        onSave = { name ->
+                            viewModel.updateRestaurantInfo(name)
+                        },
+                        onSavePin = { pin ->
+                            viewModel.setManagementPin(pin)
+                        },
+                        onExportFullBackupToUri = { uri ->
+                            viewModel.exportFullBackupToUri(context, uri)
+                        },
+                        onExportMenuBackupToUri = { uri ->
+                            viewModel.exportMenuBackupToUri(context, uri)
+                        },
+                        onShareBackup = { isFull ->
+                            viewModel.shareBackupFile(context, isFull)
+                        },
+                        onSelectBackupFile = { uri ->
+                            viewModel.readBackupFromUri(context, uri)
+                        },
+                        pendingRestoreSummary = pendingRestoreSummary,
+                        onConfirmRestore = { summary ->
+                            viewModel.confirmRestoreBackup(summary)
+                        },
+                        onDismissRestore = {
+                            viewModel.clearPendingRestore()
+                        },
+                        onOpenRoleSettings = onOpenRoleSettings,
+                        updateStatus = updateStatus,
+                        onCheckForUpdates = { viewModel.checkForUpdates(BuildConfig.VERSION_NAME) },
+                        onDownloadAndInstall = { url -> viewModel.downloadAndInstallUpdate(context, url) },
+                        onInstallDownloadedApk = { file -> viewModel.installDownloadedApk(context, file) }
+                    )
+                }
             }
         }
     }
@@ -1772,8 +1795,13 @@ private fun RestaurantSettingsTab(
     currentPin: String = "",
     onSave: (String) -> Unit,
     onSavePin: (String) -> Unit = {},
-    onExportMenu: ((String) -> Unit) -> Unit = {},
-    onImportMenu: (String) -> Unit = {},
+    onExportFullBackupToUri: (Uri) -> Unit = {},
+    onExportMenuBackupToUri: (Uri) -> Unit = {},
+    onShareBackup: (Boolean) -> Unit = {},
+    onSelectBackupFile: (Uri) -> Unit = {},
+    pendingRestoreSummary: BackupSummary? = null,
+    onConfirmRestore: (BackupSummary) -> Unit = {},
+    onDismissRestore: () -> Unit = {},
     onOpenRoleSettings: () -> Unit = {},
     updateStatus: UpdateStatus = UpdateStatus.Idle,
     onCheckForUpdates: () -> Unit = {},
@@ -1783,8 +1811,24 @@ private fun RestaurantSettingsTab(
     val context = LocalContext.current
     var nameInput by remember(currentName) { mutableStateOf(currentName) }
     var pinInput by remember(currentPin) { mutableStateOf(currentPin) }
-    var showImportJsonDialog by remember { mutableStateOf(false) }
-    var importJsonText by remember { mutableStateOf("") }
+
+    val exportFullBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let { onExportFullBackupToUri(it) }
+    }
+
+    val exportMenuBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let { onExportMenuBackupToUri(it) }
+    }
+
+    val openBackupFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { onSelectBackupFile(it) }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1979,13 +2023,13 @@ private fun RestaurantSettingsTab(
                         }
                         Column {
                             Text(
-                                text = "Menü Yedekleme & Geri Yükleme",
+                                text = "Veri Yedekleme & Geri Yükleme",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Slate900
                             )
                             Text(
-                                text = "Kategorileri ve ürünleri JSON formatında dışa/içe aktarın",
+                                text = "Geçmiş satışlar, adisyonlar, masalar ve menüyü dosya olarak yedekleyin",
                                 fontSize = 12.sp,
                                 color = Slate500
                             )
@@ -1994,39 +2038,139 @@ private fun RestaurantSettingsTab(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                onExportMenu { json ->
-                                    val intent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_SUBJECT, "$currentName - Menü Yedeği (JSON)")
-                                        putExtra(Intent.EXTRA_TEXT, json)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "Menü Yedeğini Paylaş / Kaydet"))
+                    // 1. BÖLÜM: TAM SİSTEM YEDEĞİ (ÖNERİLEN)
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Slate50,
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "1. Tam Sistem Yedeği (Önerilen)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = Slate900
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Emerald100
+                                ) {
+                                    Text(
+                                        text = "Tüm Satışlar Dahil",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Emerald700,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
                                 }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Slate900),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Yedeği Paylaş", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Tüm geçmiş adisyonlar, ödemeler, masalar, mutfak fişleri ve menüyü eksiksiz kapsar.",
+                                fontSize = 11.sp,
+                                color = Slate500
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                                        val cleanName = currentName.replace(Regex("[^a-zA-Z0-9_]"), "_")
+                                        exportFullBackupLauncher.launch("${cleanName}_tam_yedek_$timeStamp.json")
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Slate900),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(imageVector = Icons.Default.SaveAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Dosyaya Kaydet", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
 
-                        OutlinedButton(
-                            onClick = {
-                                importJsonText = ""
-                                showImportJsonDialog = true
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(imageVector = Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Yedek Yükle", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                OutlinedButton(
+                                    onClick = { onShareBackup(true) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Dosyayı Paylaş", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 2. BÖLÜM: YALNIZCA MENÜ YEDEĞİ
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Slate50,
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "2. Yalnızca Menü Yedeği",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = Slate900
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Sadece menü kategorilerini ve ürünleri kapsar; geçmiş satışları içermez.",
+                                fontSize = 11.sp,
+                                color = Slate500
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                                        val cleanName = currentName.replace(Regex("[^a-zA-Z0-9_]"), "_")
+                                        exportMenuBackupLauncher.launch("${cleanName}_menu_yedek_$timeStamp.json")
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(imageVector = Icons.Default.SaveAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Menüyü Kaydet", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+
+                                OutlinedButton(
+                                    onClick = { onShareBackup(false) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Menüyü Paylaş", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 3. BÖLÜM: GERİ YÜKLEME BUTONU
+                    Button(
+                        onClick = {
+                            openBackupFileLauncher.launch(arrayOf("application/json", "*/*"))
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(imageVector = Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Yedek Dosyası Seç & Geri Yükle", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
             }
@@ -2363,51 +2507,156 @@ private fun RestaurantSettingsTab(
         }
     }
 
-    if (showImportJsonDialog) {
+    if (pendingRestoreSummary != null) {
+        val summary = pendingRestoreSummary
         AlertDialog(
-            onDismissRequest = { showImportJsonDialog = false },
+            onDismissRequest = onDismissRestore,
             title = {
-                Text(
-                    text = "Menü Yedeğini Geri Yükle (JSON)",
-                    fontWeight = FontWeight.ExtraBold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (summary.isFullBackup) Icons.Default.Warning else Icons.Default.Inventory2,
+                        contentDescription = null,
+                        tint = if (summary.isFullBackup) Amber600 else Emerald600
+                    )
+                    Text(
+                        text = if (summary.isFullBackup) "Tam Sistem Yedeğini Geri Yükle" else "Menü Yedeğini Geri Yükle",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 17.sp
+                    )
+                }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Daha önce dışa aktardığınız JSON yedek metnini aşağıya yapıştırın. Mevcut kategorilere ve ürünlere ekleme yapılacaktır.",
-                        fontSize = 12.sp,
-                        color = Slate700
-                    )
-                    OutlinedTextField(
-                        value = importJsonText,
-                        onValueChange = { importJsonText = it },
-                        label = { Text("JSON Yedek Verisi") },
-                        placeholder = { Text("{\"categories\": [...], \"items\": [...]}") },
-                        maxLines = 6,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(140.dp)
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Slate100,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("İşletme:", fontSize = 12.sp, color = Slate500)
+                                Text(
+                                    summary.restaurantName.ifBlank { "Xubopos" },
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = Slate900
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Yedek Tarihi:", fontSize = 12.sp, color = Slate500)
+                                val dateStr = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(summary.createdAt))
+                                Text(dateStr, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
+                            }
+                            HorizontalDivider(color = Slate200)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Menü:", fontSize = 12.sp, color = Slate500)
+                                Text("${summary.categoryCount} Kategori, ${summary.menuItemCount} Ürün", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
+                            }
+                            if (summary.isFullBackup) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Masalar:", fontSize = 12.sp, color = Slate500)
+                                    Text("${summary.tableCount} Masa", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Adisyon & Kalemler:", fontSize = 12.sp, color = Slate500)
+                                    Text("${summary.billCount} Adisyon (${summary.orderItemCount} Kalem)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Tahsilat İşlemleri:", fontSize = 12.sp, color = Slate500)
+                                    Text("${summary.paymentCount} Ödeme Kaydı", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Kayıtlı Toplam Ciro:", fontSize = 12.sp, color = Slate500)
+                                    Text(
+                                        "₺${String.format(Locale.getDefault(), "%,.2f", summary.totalRevenue)}",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 13.sp,
+                                        color = Emerald700
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (summary.isFullBackup) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Amber50,
+                            border = BorderStroke(1.dp, Amber100),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = Amber600,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "DİKKAT: Tam sistem yedeği geri yüklendiğinde mevcut cihazdaki tüm veriler temizlenecek ve yerini bu yedekteki veriler alacaktır.",
+                                    fontSize = 11.sp,
+                                    color = Amber700,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Yedekteki kategoriler ve ürünler mevcut menünüze eklenecektir.",
+                            fontSize = 12.sp,
+                            color = Slate700
+                        )
+                    }
                 }
             },
             confirmButton = {
                 Button(
-                    onClick = {
-                        if (importJsonText.isNotBlank()) {
-                            onImportMenu(importJsonText.trim())
-                            showImportJsonDialog = false
-                        }
-                    },
-                    enabled = importJsonText.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
+                    onClick = { onConfirmRestore(summary) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (summary.isFullBackup) Amber600 else Emerald600
+                    ),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("İçe Aktar", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (summary.isFullBackup) "Onayla ve Geri Yükle" else "İçe Aktar",
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showImportJsonDialog = false }) {
-                    Text("Vazgeç")
+                TextButton(onClick = onDismissRestore) {
+                    Text("Vazgeç", color = Slate500)
                 }
             }
         )

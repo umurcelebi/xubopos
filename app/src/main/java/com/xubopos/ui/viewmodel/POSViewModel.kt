@@ -2,6 +2,11 @@ package com.xubopos.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.core.content.FileProvider
+import com.xubopos.data.repository.BackupSummary
+import com.xubopos.data.repository.FullBackupPayload
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
@@ -139,6 +144,9 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _updateStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
     val updateStatus: StateFlow<UpdateStatus> = _updateStatus.asStateFlow()
+
+    private val _pendingRestoreSummary = MutableStateFlow<BackupSummary?>(null)
+    val pendingRestoreSummary: StateFlow<BackupSummary?> = _pendingRestoreSummary.asStateFlow()
 
     val selectedTable: StateFlow<RestaurantTable?>
     val currentBill: StateFlow<OrderBill?>
@@ -1141,6 +1149,133 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             "Yönetim paneli PIN kilidi kaldırıldı"
         } else {
             "Yönetim paneli PIN kodu güncellendi"
+        }
+    }
+
+    fun exportFullBackupToUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val json = repository.exportFullBackupJson(_restaurantName.value, _lastDayCloseTime.value)
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.writer(Charsets.UTF_8).use { it.write(json) }
+                }
+                _snackbarMessage.value = "Tam sistem yedeği başarıyla dosyaya kaydedildi!"
+            } catch (e: Exception) {
+                Log.e("POSViewModel", "Export full backup error", e)
+                _snackbarMessage.value = "Yedek kaydedilirken hata oluştu: ${e.message}"
+            }
+        }
+    }
+
+    fun exportMenuBackupToUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val json = repository.exportMenuJson()
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.writer(Charsets.UTF_8).use { it.write(json) }
+                }
+                _snackbarMessage.value = "Menü yedeği başarıyla dosyaya kaydedildi!"
+            } catch (e: Exception) {
+                Log.e("POSViewModel", "Export menu backup error", e)
+                _snackbarMessage.value = "Yedek kaydedilirken hata oluştu: ${e.message}"
+            }
+        }
+    }
+
+    fun shareBackupFile(context: Context, isFull: Boolean) {
+        viewModelScope.launch {
+            try {
+                val json = if (isFull) {
+                    repository.exportFullBackupJson(_restaurantName.value, _lastDayCloseTime.value)
+                } else {
+                    repository.exportMenuJson()
+                }
+                val dir = File(context.cacheDir, "backups").apply { mkdirs() }
+                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                val cleanName = _restaurantName.value.replace(Regex("[^a-zA-Z0-9_]"), "_")
+                val prefix = if (isFull) "tam_yedek" else "menu_yedek"
+                val file = File(dir, "${cleanName}_${prefix}_$timeStamp.json")
+                file.writeText(json, Charsets.UTF_8)
+
+                val contentUri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_STREAM, contentUri)
+                    putExtra(Intent.EXTRA_SUBJECT, "${_restaurantName.value} - ${if (isFull) "Tam Sistem Yedeği" else "Menü Yedeği"}")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "Yedek Dosyasını Paylaş / Gönder"))
+            } catch (e: Exception) {
+                Log.e("POSViewModel", "Share backup error", e)
+                _snackbarMessage.value = "Yedek dosyası paylaşılırken hata oluştu: ${e.message}"
+            }
+        }
+    }
+
+    fun readBackupFromUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val json = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    stream.reader(Charsets.UTF_8).readText()
+                }
+                if (json.isNullOrBlank()) {
+                    _snackbarMessage.value = "Dosya okunamadı veya içi boş!"
+                    return@launch
+                }
+                val summary = repository.parseBackupJson(json)
+                if (summary != null) {
+                    _pendingRestoreSummary.value = summary
+                } else {
+                    _snackbarMessage.value = "Seçilen dosya geçerli bir Xubopos yedek dosyası değil!"
+                }
+            } catch (e: Exception) {
+                Log.e("POSViewModel", "Read backup error", e)
+                _snackbarMessage.value = "Dosya okunurken hata oluştu: ${e.message}"
+            }
+        }
+    }
+
+    fun clearPendingRestore() {
+        _pendingRestoreSummary.value = null
+    }
+
+    fun confirmRestoreBackup(summary: BackupSummary) {
+        viewModelScope.launch {
+            val ok = repository.restoreFromSummary(summary)
+            if (ok) {
+                if (summary.isFullBackup) {
+                    if (summary.restaurantName.isNotBlank()) {
+                        _restaurantName.value = summary.restaurantName
+                    }
+                    _lastDayCloseTime.value = summary.lastDayCloseTime
+                    prefs.edit()
+                        .putString("restaurant_name", summary.restaurantName)
+                        .putLong("last_day_close_time", summary.lastDayCloseTime)
+                        .apply()
+                    refreshDetailedReport()
+
+                    if (_deviceRole.value == DeviceRole.SERVER) {
+                        val tables = repository.allTables.firstOrNull() ?: emptyList()
+                        server?.broadcastTables(tables)
+                        val tickets = repository.activeKitchenTickets.firstOrNull() ?: emptyList()
+                        server?.broadcastTickets(tickets)
+                        val activeItems = repository.activeOrderItems.firstOrNull() ?: emptyList()
+                        server?.broadcastActiveItems(activeItems)
+                    }
+                }
+                _snackbarMessage.value = if (summary.isFullBackup) {
+                    "Tam sistem yedeği başarıyla geri yüklendi!"
+                } else {
+                    "Menü yedeği başarıyla geri yüklendi!"
+                }
+            } else {
+                _snackbarMessage.value = "Yedek geri yüklenirken hata oluştu!"
+            }
+            _pendingRestoreSummary.value = null
         }
     }
 

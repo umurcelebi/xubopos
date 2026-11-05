@@ -727,6 +727,36 @@ class POSRepository(private val dao: RestaurantDao) {
         dao.deleteKitchenTicketsForTable(tableId)
     }
 
+    suspend fun exportFullBackup(restaurantName: String, lastDayCloseTime: Long): FullBackupPayload {
+        val tables = dao.getAllTablesSync()
+        val categories = dao.getAllCategoriesSync()
+        val items = dao.getAllMenuItemsSync()
+        val bills = dao.getAllBillsSync()
+        val orderItems = dao.getAllOrderItemsSync()
+        val payments = dao.getAllPaymentRecordsSync()
+        val tickets = dao.getAllKitchenTicketsSync()
+
+        return FullBackupPayload(
+            backupVersion = 1,
+            createdAt = System.currentTimeMillis(),
+            appVersion = "1.0.13",
+            restaurantName = restaurantName,
+            lastDayCloseTime = lastDayCloseTime,
+            tables = tables,
+            categories = categories,
+            menuItems = items,
+            bills = bills,
+            orderItems = orderItems,
+            payments = payments,
+            kitchenTickets = tickets
+        )
+    }
+
+    suspend fun exportFullBackupJson(restaurantName: String, lastDayCloseTime: Long): String {
+        val payload = exportFullBackup(restaurantName, lastDayCloseTime)
+        return Gson().toJson(payload)
+    }
+
     suspend fun exportMenuJson(): String {
         val categories = dao.getAllCategoriesSync()
         val items = dao.getAllMenuItemsSync()
@@ -745,6 +775,80 @@ class POSRepository(private val dao: RestaurantDao) {
                 dao.insertMenuItems(backup.menuItems)
             }
             true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun parseBackupJson(json: String): BackupSummary? {
+        return try {
+            val jsonObject = com.google.gson.JsonParser.parseString(json).asJsonObject
+            val isFull = jsonObject.has("bills") || jsonObject.has("tables") || jsonObject.has("payments")
+            val gson = Gson()
+            if (isFull) {
+                val full = gson.fromJson(jsonObject, FullBackupPayload::class.java)
+                BackupSummary(
+                    backupVersion = full.backupVersion,
+                    createdAt = full.createdAt,
+                    restaurantName = full.restaurantName,
+                    lastDayCloseTime = full.lastDayCloseTime,
+                    tableCount = full.tables.size,
+                    categoryCount = full.categories.size,
+                    menuItemCount = full.menuItems.size,
+                    billCount = full.bills.size,
+                    orderItemCount = full.orderItems.size,
+                    paymentCount = full.payments.size,
+                    totalRevenue = full.payments.sumOf { it.amount },
+                    isFullBackup = true,
+                    fullPayload = full
+                )
+            } else {
+                val menu = gson.fromJson(jsonObject, MenuBackupPayload::class.java)
+                BackupSummary(
+                    backupVersion = 1,
+                    createdAt = System.currentTimeMillis(),
+                    restaurantName = "Menü Yedeği",
+                    tableCount = 0,
+                    categoryCount = menu.categories.size,
+                    menuItemCount = menu.menuItems.size,
+                    billCount = 0,
+                    orderItemCount = 0,
+                    paymentCount = 0,
+                    totalRevenue = 0.0,
+                    isFullBackup = false,
+                    menuPayload = menu
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun restoreFromSummary(summary: BackupSummary): Boolean {
+        return try {
+            if (summary.isFullBackup && summary.fullPayload != null) {
+                val p = summary.fullPayload
+                dao.restoreFullDatabase(
+                    tables = p.tables,
+                    categories = p.categories,
+                    menuItems = p.menuItems,
+                    bills = p.bills,
+                    orderItems = p.orderItems,
+                    payments = p.payments,
+                    kitchenTickets = p.kitchenTickets
+                )
+                true
+            } else if (summary.menuPayload != null) {
+                if (summary.menuPayload.categories.isNotEmpty()) {
+                    dao.insertCategories(summary.menuPayload.categories)
+                }
+                if (summary.menuPayload.menuItems.isNotEmpty()) {
+                    dao.insertMenuItems(summary.menuPayload.menuItems)
+                }
+                true
+            } else {
+                false
+            }
         } catch (_: Exception) {
             false
         }
@@ -869,4 +973,36 @@ class POSRepository(private val dao: RestaurantDao) {
 data class MenuBackupPayload(
     val categories: List<MenuCategory> = emptyList(),
     val menuItems: List<MenuItem> = emptyList()
+)
+
+data class FullBackupPayload(
+    val backupVersion: Int = 1,
+    val createdAt: Long = System.currentTimeMillis(),
+    val appVersion: String = "1.0.13",
+    val restaurantName: String = "Xubopos",
+    val lastDayCloseTime: Long = 0L,
+    val tables: List<RestaurantTable> = emptyList(),
+    val categories: List<MenuCategory> = emptyList(),
+    val menuItems: List<MenuItem> = emptyList(),
+    val bills: List<OrderBill> = emptyList(),
+    val orderItems: List<OrderItem> = emptyList(),
+    val payments: List<PaymentRecord> = emptyList(),
+    val kitchenTickets: List<KitchenTicketEntity> = emptyList()
+)
+
+data class BackupSummary(
+    val backupVersion: Int = 1,
+    val createdAt: Long = System.currentTimeMillis(),
+    val restaurantName: String = "",
+    val lastDayCloseTime: Long = 0L,
+    val tableCount: Int = 0,
+    val categoryCount: Int = 0,
+    val menuItemCount: Int = 0,
+    val billCount: Int = 0,
+    val orderItemCount: Int = 0,
+    val paymentCount: Int = 0,
+    val totalRevenue: Double = 0.0,
+    val isFullBackup: Boolean = true,
+    val fullPayload: FullBackupPayload? = null,
+    val menuPayload: MenuBackupPayload? = null
 )

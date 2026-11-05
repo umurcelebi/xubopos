@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.xubopos.data.model.KitchenTicketEntity
 import com.xubopos.data.model.MenuCategory
@@ -206,4 +207,80 @@ interface RestaurantDao {
 
     @Query("DELETE FROM kitchen_tickets WHERE tableId = :tableId")
     suspend fun deleteKitchenTicketsForTable(tableId: Int)
+
+    // --- YEDEKLEME & GERİ YÜKLEME İŞLEMLERİ ---
+    @Query("SELECT * FROM restaurant_tables ORDER BY id ASC")
+    suspend fun getAllTablesSync(): List<RestaurantTable>
+
+    @Query("SELECT * FROM order_bills ORDER BY id ASC")
+    suspend fun getAllBillsSync(): List<OrderBill>
+
+    @Query("SELECT * FROM order_items ORDER BY id ASC")
+    suspend fun getAllOrderItemsSync(): List<OrderItem>
+
+    @Query("SELECT * FROM payment_records ORDER BY id ASC")
+    suspend fun getAllPaymentRecordsSync(): List<PaymentRecord>
+
+    @Query("SELECT * FROM kitchen_tickets ORDER BY createdAt ASC")
+    suspend fun getAllKitchenTicketsSync(): List<KitchenTicketEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBills(bills: List<OrderBill>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrderItems(items: List<OrderItem>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPayments(payments: List<PaymentRecord>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertKitchenTickets(tickets: List<KitchenTicketEntity>)
+
+    @Query("DELETE FROM restaurant_tables")
+    suspend fun clearTables()
+
+    @Query("DELETE FROM menu_categories")
+    suspend fun clearCategories()
+
+    @Query("DELETE FROM menu_items")
+    suspend fun clearMenuItems()
+
+    @Query("DELETE FROM order_bills")
+    suspend fun clearBills()
+
+    @Query("DELETE FROM order_items")
+    suspend fun clearOrderItems()
+
+    @Query("DELETE FROM payment_records")
+    suspend fun clearPayments()
+
+    @Query("DELETE FROM kitchen_tickets")
+    suspend fun clearKitchenTickets()
+
+    @Transaction
+    suspend fun restoreFullDatabase(
+        tables: List<RestaurantTable>,
+        categories: List<MenuCategory>,
+        menuItems: List<MenuItem>,
+        bills: List<OrderBill>,
+        orderItems: List<OrderItem>,
+        payments: List<PaymentRecord>,
+        kitchenTickets: List<KitchenTicketEntity>
+    ) {
+        clearTables()
+        clearCategories()
+        clearMenuItems()
+        clearBills()
+        clearOrderItems()
+        clearPayments()
+        clearKitchenTickets()
+
+        if (tables.isNotEmpty()) insertTables(tables)
+        if (categories.isNotEmpty()) insertCategories(categories)
+        if (menuItems.isNotEmpty()) insertMenuItems(menuItems)
+        if (bills.isNotEmpty()) insertBills(bills)
+        if (orderItems.isNotEmpty()) insertOrderItems(orderItems)
+        if (payments.isNotEmpty()) insertPayments(payments)
+        if (kitchenTickets.isNotEmpty()) insertKitchenTickets(kitchenTickets)
+    }
 }
