@@ -161,7 +161,11 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
         activeKitchenTickets = combine(_deviceRole, repository.activeKitchenTickets, _remoteKitchenTickets) { role, local, remote ->
-            if (role == DeviceRole.SERVER) local else remote
+            val raw = if (role == DeviceRole.SERVER) local else remote
+            raw.groupBy { it.tableId }
+                .values
+                .map { ticketGroup -> ticketGroup.maxByOrNull { it.createdAt } ?: ticketGroup.first() }
+                .sortedBy { it.createdAt }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
         dailyReport = repository.getDailyReportFlow(_lastDayCloseTime).stateIn(
@@ -279,11 +283,26 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                                 )
                             }
                         }
+                        val activeItems = repository.getActiveOrderItemsForTable(addOrderPayload.tableId)
+                        val dtoList = if (activeItems.isNotEmpty()) {
+                            activeItems.map {
+                                KitchenTicketItemDto(
+                                    id = it.id,
+                                    itemName = it.itemName,
+                                    categoryName = it.categoryName,
+                                    quantity = it.quantity,
+                                    note = it.note
+                                )
+                            }
+                        } else {
+                            addOrderPayload.items
+                        }
+
                         repository.createKitchenTicket(
                             tableId = addOrderPayload.tableId,
                             tableName = addOrderPayload.tableName,
                             waiterName = addOrderPayload.waiterName,
-                            items = addOrderPayload.items
+                            items = dtoList
                         )
                         _snackbarMessage.value = "${addOrderPayload.tableName} için yeni sipariş alındı"
                     }

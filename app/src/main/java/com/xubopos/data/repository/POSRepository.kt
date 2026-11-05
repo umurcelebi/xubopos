@@ -497,25 +497,54 @@ class POSRepository(private val dao: RestaurantDao) {
         dao.deleteMenuItem(item)
     }
 
+    suspend fun getActiveOrderItemsForTable(tableId: Int): List<OrderItem> {
+        val table = dao.getTableById(tableId) ?: return emptyList()
+        val billId = table.currentBillId ?: return emptyList()
+        return dao.getOrderItemsForBillSync(billId)
+    }
+
     suspend fun createKitchenTicket(
         tableId: Int,
         tableName: String,
         waiterName: String,
         items: List<KitchenTicketItemDto>
     ): KitchenTicketEntity {
-        val ticketId = "TKT-${(System.currentTimeMillis() % 100000)}"
+        val existingTickets = dao.getActiveKitchenTicketsForTable(tableId)
         val itemsJson = Gson().toJson(items)
-        val entity = KitchenTicketEntity(
-            ticketId = ticketId,
-            tableId = tableId,
-            tableName = tableName,
-            waiterName = waiterName,
-            createdAt = System.currentTimeMillis(),
-            itemsJson = itemsJson,
-            status = "PENDING"
-        )
-        dao.insertKitchenTicket(entity)
-        return entity
+        val currentTime = System.currentTimeMillis()
+
+        if (existingTickets.isNotEmpty()) {
+            val primaryTicket = existingTickets.first()
+            val updated = primaryTicket.copy(
+                tableName = tableName,
+                waiterName = waiterName,
+                createdAt = currentTime,
+                itemsJson = itemsJson,
+                status = "PENDING"
+            )
+            dao.updateKitchenTicket(updated)
+
+            // Varsa diğer mükerrer aktif fişleri sonlandır
+            if (existingTickets.size > 1) {
+                for (extra in existingTickets.drop(1)) {
+                    dao.updateKitchenTicketStatus(extra.ticketId, "COMPLETED")
+                }
+            }
+            return updated
+        } else {
+            val ticketId = "TKT-${(currentTime % 100000)}"
+            val entity = KitchenTicketEntity(
+                ticketId = ticketId,
+                tableId = tableId,
+                tableName = tableName,
+                waiterName = waiterName,
+                createdAt = currentTime,
+                itemsJson = itemsJson,
+                status = "PENDING"
+            )
+            dao.insertKitchenTicket(entity)
+            return entity
+        }
     }
 
     suspend fun updateKitchenTicketStatus(ticketId: String, status: String) {

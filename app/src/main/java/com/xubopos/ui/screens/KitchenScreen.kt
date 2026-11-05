@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.LocalDining
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.ScreenRotation
@@ -144,7 +145,8 @@ fun KitchenScreen(
 
     var selectedFilter by remember { mutableStateOf("Tümü") }
     var soundEnabled by remember { mutableStateOf(true) }
-    var previousTicketCount by remember { mutableStateOf(tickets.size) }
+    var lastKnownSyncKey by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
     var isLandscapeLocked by remember {
         mutableStateOf(activity?.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
     }
@@ -158,14 +160,26 @@ fun KitchenScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(tickets.size) {
-        if (tickets.size > previousTicketCount) {
-            if (soundEnabled) {
-                KitchenAudioHelper.playKitchenAlert(context)
+    val ticketsSyncKey = remember(tickets) {
+        val count = tickets.size
+        val maxCreated = tickets.maxOfOrNull { it.createdAt } ?: 0L
+        val totalQty = tickets.sumOf { it.getItems().sumOf { item -> item.quantity } }
+        "${count}_${maxCreated}_${totalQty}"
+    }
+
+    LaunchedEffect(ticketsSyncKey) {
+        if (lastKnownSyncKey == null) {
+            // İlk açılışta eski siparişler için hemen çalma, mevcut durumu kaydet
+            lastKnownSyncKey = ticketsSyncKey
+        } else if (ticketsSyncKey != lastKnownSyncKey) {
+            lastKnownSyncKey = ticketsSyncKey
+            if (tickets.isNotEmpty()) {
+                if (soundEnabled) {
+                    KitchenAudioHelper.playKitchenAlert(context)
+                }
+                snackbarHostState.showSnackbar("Yeni mutfak siparişi geldi!")
             }
-            snackbarHostState.showSnackbar("Yeni sipariş geldi!")
         }
-        previousTicketCount = tickets.size
     }
 
     LaunchedEffect(snackbarMessage) {
@@ -277,11 +291,23 @@ fun KitchenScreen(
                         ) {
                             // Ses butonu
                             IconButton(
-                                onClick = { soundEnabled = !soundEnabled },
+                                onClick = {
+                                    soundEnabled = !soundEnabled
+                                    if (soundEnabled) {
+                                        KitchenAudioHelper.playKitchenAlert(context)
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Mutfak zil sesi açıldı (Test çalındı)")
+                                        }
+                                    } else {
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Mutfak zil sesi kapatıldı")
+                                        }
+                                    }
+                                },
                                 modifier = Modifier.size(36.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (soundEnabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
+                                    imageVector = if (soundEnabled) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
                                     contentDescription = "Zil Sesi",
                                     tint = if (soundEnabled) Amber500 else Slate500,
                                     modifier = Modifier.size(20.dp)
@@ -449,7 +475,7 @@ private fun KitchenTicketCard(
     onUpdateStatus: (String) -> Unit
 ) {
     val items = remember(ticket.itemsJson) { ticket.getItems() }
-    val itemCompletedStates = remember { mutableStateMapOf<Long, Boolean>() }
+    val itemCompletedStates = remember(ticket.itemsJson) { mutableStateMapOf<Long, Boolean>() }
     val coroutineScope = rememberCoroutineScope()
 
     var isCompleting by remember { mutableStateOf(false) }

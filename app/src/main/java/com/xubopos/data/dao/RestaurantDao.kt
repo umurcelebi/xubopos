@@ -168,6 +168,9 @@ interface RestaurantDao {
     @Query("SELECT * FROM kitchen_tickets WHERE status != 'COMPLETED' ORDER BY createdAt ASC")
     fun getActiveKitchenTickets(): Flow<List<KitchenTicketEntity>>
 
+    @Query("SELECT * FROM kitchen_tickets WHERE tableId = :tableId AND status != 'COMPLETED' ORDER BY createdAt DESC")
+    suspend fun getActiveKitchenTicketsForTable(tableId: Int): List<KitchenTicketEntity>
+
     @Query("SELECT * FROM kitchen_tickets ORDER BY createdAt DESC LIMIT 100")
     fun getAllKitchenTickets(): Flow<List<KitchenTicketEntity>>
 
