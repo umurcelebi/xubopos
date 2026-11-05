@@ -13,17 +13,23 @@ import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentHashMap
 
 class LocalPosServer(
     port: Int = 8887,
-    private val onClientHandshake: (WebSocket) -> Unit,
+    private val onClientHandshake: (WebSocket, NetworkPacket) -> Unit,
     private val onAddOrderReceived: (AddOrderPayload) -> Unit,
-    private val onUpdateTicketReceived: (UpdateTicketStatusPayload) -> Unit
+    private val onUpdateTicketReceived: (UpdateTicketStatusPayload) -> Unit,
+    private val onLockTableReceived: (TableLockPayload, WebSocket) -> Unit = { _, _ -> },
+    private val onUnlockTableReceived: (TableLockPayload, WebSocket) -> Unit = { _, _ -> },
+    private val onClientDisconnected: (WebSocket) -> Unit = {}
 ) : WebSocketServer(InetSocketAddress(port)) {
 
     private val gson = Gson()
     private val _connectedClientCount = MutableStateFlow(0)
     val connectedClientCount: StateFlow<Int> = _connectedClientCount.asStateFlow()
+
+    private val clientRoles = ConcurrentHashMap<WebSocket, String>()
 
     companion object {
         private const val TAG = "LocalPosServer"
@@ -37,10 +43,13 @@ class LocalPosServer(
         val count = connections.size
         _connectedClientCount.value = count
         Log.d(TAG, "New client connected from ${conn?.remoteSocketAddress}. Total clients: $count")
-        conn?.let { onClientHandshake(it) }
     }
 
     override fun onClose(conn: WebSocket?, code: Int, reason: String?, remote: Boolean) {
+        conn?.let {
+            clientRoles.remove(it)
+            onClientDisconnected(it)
+        }
         val count = connections.size
         _connectedClientCount.value = count
         Log.d(TAG, "Client disconnected: $reason. Remaining: $count")
@@ -52,7 +61,20 @@ class LocalPosServer(
             val packet = gson.fromJson(message, NetworkPacket::class.java)
             when (packet.action) {
                 "HANDSHAKE" -> {
-                    conn?.let { onClientHandshake(it) }
+                    conn?.let {
+                        if (packet.role.isNotBlank()) {
+                            clientRoles[it] = packet.role
+                        }
+                        onClientHandshake(it, packet)
+                    }
+                }
+                "LOCK_TABLE" -> {
+                    val payload = gson.fromJson(packet.payload, TableLockPayload::class.java)
+                    conn?.let { onLockTableReceived(payload, it) }
+                }
+                "UNLOCK_TABLE" -> {
+                    val payload = gson.fromJson(packet.payload, TableLockPayload::class.java)
+                    conn?.let { onUnlockTableReceived(payload, it) }
                 }
                 "ADD_ORDER" -> {
                     val payload = gson.fromJson(packet.payload, AddOrderPayload::class.java)
@@ -76,6 +98,10 @@ class LocalPosServer(
 
     override fun onError(conn: WebSocket?, ex: Exception?) {
         Log.e(TAG, "Server socket error", ex)
+    }
+
+    fun isAnyKitchenClientConnected(): Boolean {
+        return clientRoles.values.any { it == DeviceRole.KITCHEN.name }
     }
 
     fun sendPacket(conn: WebSocket, packet: NetworkPacket) {
@@ -123,6 +149,22 @@ class LocalPosServer(
         val packet = NetworkPacket(
             action = "FULL_SYNC",
             payload = gson.toJson(payload)
+        )
+        broadcastPacket(packet)
+    }
+
+    fun broadcastTableLocks(locks: List<TableLockEntry>) {
+        val packet = NetworkPacket(
+            action = "TABLE_LOCKS_UPDATE",
+            payload = gson.toJson(locks)
+        )
+        broadcastPacket(packet)
+    }
+
+    fun broadcastKitchenStatus(isActive: Boolean) {
+        val packet = NetworkPacket(
+            action = "KITCHEN_STATUS",
+            payload = isActive.toString()
         )
         broadcastPacket(packet)
     }

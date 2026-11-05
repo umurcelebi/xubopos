@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -42,6 +43,10 @@ import com.xubopos.ui.theme.Emerald100
 import com.xubopos.ui.theme.Emerald500
 import com.xubopos.ui.theme.Emerald700
 import com.xubopos.ui.theme.PureWhite
+import com.xubopos.ui.theme.Rose100
+import com.xubopos.ui.theme.Rose50
+import com.xubopos.ui.theme.Rose500
+import com.xubopos.ui.theme.Rose700
 import com.xubopos.ui.theme.Sky100
 import com.xubopos.ui.theme.Sky50
 import com.xubopos.ui.theme.Sky500
@@ -58,17 +63,21 @@ import com.xubopos.ui.theme.Slate900
 fun TableCard(
     table: RestaurantTable,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    lockedBy: String? = null
 ) {
     val isOccupied = table.isOccupied
     val isPartial = table.isPartiallyPaid
+    val isLocked = lockedBy != null
 
     val containerColor = when {
+        isLocked -> Rose50
         isPartial -> Sky50
         isOccupied -> Amber50
         else -> PureWhite
     }
     val borderColor = when {
+        isLocked -> Rose500
         isPartial -> Sky500
         isOccupied -> Amber500
         else -> Slate200
@@ -89,6 +98,7 @@ fun TableCard(
         else -> "Müsait"
     }
     val dotColor = when {
+        isLocked -> Rose500
         isPartial -> Sky500
         isOccupied -> Amber500
         else -> Emerald500
@@ -102,8 +112,8 @@ fun TableCard(
             .clickable { onClick() },
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = containerColor),
-        border = BorderStroke(if (isOccupied) 2.dp else 1.dp, borderColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isOccupied) 4.dp else 1.dp)
+        border = BorderStroke(if (isLocked || isOccupied) 2.dp else 1.dp, borderColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isLocked || isOccupied) 4.dp else 1.dp)
     ) {
         Column(
             modifier = Modifier
@@ -136,17 +146,45 @@ fun TableCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = badgeBg
-                    ) {
-                        Text(
-                            text = statusLabel,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = badgeText,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                        )
+                    if (lockedBy != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Rose100
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = Rose700,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = "$lockedBy Açık",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Rose700,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    } else {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = badgeBg
+                        ) {
+                            Text(
+                                text = statusLabel,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = badgeText,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
                     }
                 }
 

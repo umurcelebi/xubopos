@@ -27,7 +27,10 @@ import com.xubopos.network.FullSyncPayload
 import com.xubopos.network.LocalPosClient
 import com.xubopos.network.LocalPosServer
 import com.xubopos.network.NetworkPacket
+import android.provider.Settings
 import com.xubopos.network.PosNsdHelper
+import com.xubopos.network.TableLockEntry
+import com.xubopos.network.TableLockPayload
 import com.xubopos.update.AppUpdateManager
 import com.xubopos.update.UpdateInfo
 import com.xubopos.update.UpdateStatus
@@ -36,6 +39,8 @@ import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -130,6 +135,26 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     val currentOrderItems: StateFlow<List<OrderItem>>
     val currentPayments: StateFlow<List<PaymentRecord>>
     val filteredMenuItems: StateFlow<List<MenuItem>>
+
+    val deviceId: String = Settings.Secure.getString(
+        application.contentResolver,
+        Settings.Secure.ANDROID_ID
+    ) ?: UUID.randomUUID().toString()
+
+    val deviceName: String
+        get() = when (_deviceRole.value) {
+            DeviceRole.SERVER -> "Kasa"
+            DeviceRole.WAITER -> "Garson (${Build.MODEL ?: "Terminal"})"
+            DeviceRole.KITCHEN -> "Mutfak (${Build.MODEL ?: "Ekran"})"
+        }
+
+    private val _activeTableLocks = MutableStateFlow<Map<Int, TableLockEntry>>(emptyMap())
+    val activeTableLocks: StateFlow<Map<Int, TableLockEntry>> = _activeTableLocks.asStateFlow()
+
+    private val _isKitchenConnected = MutableStateFlow(false)
+    val isKitchenConnected: StateFlow<Boolean> = _isKitchenConnected.asStateFlow()
+
+    private val serverClientTableLocks = ConcurrentHashMap<org.java_websocket.WebSocket, MutableSet<Int>>()
 
     private var server: LocalPosServer? = null
     private var client: LocalPosClient? = null
@@ -251,16 +276,22 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         try {
             server = LocalPosServer(
                 port = 8887,
-                onClientHandshake = { socket ->
+                onClientHandshake = { socket, packet ->
                     viewModelScope.launch {
                         val activeItems = repository.activeOrderItems.firstOrNull() ?: emptyList()
+                        val isKit = (server?.isAnyKitchenClientConnected() == true) || (_deviceRole.value == DeviceRole.KITCHEN)
+                        _isKitchenConnected.value = isKit
+                        server?.broadcastKitchenStatus(isKit)
+
                         val payload = FullSyncPayload(
                             restaurantName = _restaurantName.value,
                             tables = allTables.value,
                             categories = allCategories.value,
                             menuItems = allMenuItems.value,
                             activeTickets = activeKitchenTickets.value,
-                            activeOrderItems = activeItems
+                            activeOrderItems = activeItems,
+                            tableLocks = _activeTableLocks.value.values.toList(),
+                            isKitchenActive = isKit
                         )
                         server?.sendPacket(
                             socket,
@@ -311,6 +342,36 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                     viewModelScope.launch {
                         repository.updateKitchenTicketStatus(updatePayload.ticketId, updatePayload.status)
                     }
+                },
+                onLockTableReceived = { payload, socket ->
+                    serverClientTableLocks.getOrPut(socket) { mutableSetOf() }.add(payload.tableId)
+                    val map = _activeTableLocks.value.toMutableMap()
+                    map[payload.tableId] = TableLockEntry(payload.tableId, payload.deviceId, payload.deviceName)
+                    _activeTableLocks.value = map
+                    server?.broadcastTableLocks(map.values.toList())
+                },
+                onUnlockTableReceived = { payload, socket ->
+                    serverClientTableLocks[socket]?.remove(payload.tableId)
+                    val map = _activeTableLocks.value.toMutableMap()
+                    if (map[payload.tableId]?.deviceId == payload.deviceId) {
+                        map.remove(payload.tableId)
+                        _activeTableLocks.value = map
+                        server?.broadcastTableLocks(map.values.toList())
+                    }
+                },
+                onClientDisconnected = { socket ->
+                    val lockedTables = serverClientTableLocks.remove(socket)
+                    if (!lockedTables.isNullOrEmpty()) {
+                        val map = _activeTableLocks.value.toMutableMap()
+                        for (tid in lockedTables) {
+                            map.remove(tid)
+                        }
+                        _activeTableLocks.value = map
+                        server?.broadcastTableLocks(map.values.toList())
+                    }
+                    val isKit = (server?.isAnyKitchenClientConnected() == true) || (_deviceRole.value == DeviceRole.KITCHEN)
+                    _isKitchenConnected.value = isKit
+                    server?.broadcastKitchenStatus(isKit)
                 }
             ).apply {
                 start()
@@ -366,7 +427,8 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             client = LocalPosClient(
                 serverUri = uri,
                 role = _deviceRole.value,
-                deviceName = Build.MODEL ?: "Android Cihaz",
+                deviceName = deviceName,
+                deviceId = deviceId,
                 onFullSyncReceived = { fullSync ->
                     _restaurantName.value = fullSync.restaurantName
                     _remoteTables.value = fullSync.tables
@@ -374,6 +436,8 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                     _remoteMenuItems.value = fullSync.menuItems
                     _remoteKitchenTickets.value = fullSync.activeTickets
                     _remoteActiveItems.value = fullSync.activeOrderItems
+                    _activeTableLocks.value = fullSync.tableLocks.associateBy { it.tableId }
+                    _isKitchenConnected.value = fullSync.isKitchenActive
                     _connectionStatus.value = ConnectionStatus.CONNECTED
                 },
                 onTablesUpdateReceived = { tables ->
@@ -384,6 +448,12 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 },
                 onActiveItemsUpdateReceived = { items ->
                     _remoteActiveItems.value = items
+                },
+                onTableLocksUpdateReceived = { locks ->
+                    _activeTableLocks.value = locks.associateBy { it.tableId }
+                },
+                onKitchenStatusUpdateReceived = { isKit ->
+                    _isKitchenConnected.value = isKit
                 }
             ).apply {
                 connect()
@@ -403,6 +473,8 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     fun switchDeviceRole(newRole: DeviceRole) {
         prefs.edit().putString("device_role", newRole.name).apply()
         _deviceRole.value = newRole
+        _isKitchenConnected.value = (newRole == DeviceRole.KITCHEN)
+        _activeTableLocks.value = emptyMap()
         _currentScreen.value = if (newRole == DeviceRole.KITCHEN) AppScreen.KITCHEN else AppScreen.TABLES
         _snackbarMessage.value = "Cihaz modu '${newRole.title}' olarak ayarlandı"
         initNetworking()
@@ -450,9 +522,53 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         _selectedZone.value = zone
     }
 
-    fun selectTable(tableId: Int?) {
+    fun selectTable(tableId: Int?): Boolean {
+        if (tableId == null) {
+            val currentId = _selectedTableId.value
+            if (currentId != null) {
+                releaseTableLock(currentId)
+            }
+            _selectedTableId.value = null
+            _menuSearchQuery.value = ""
+            return true
+        }
+
+        val currentLock = _activeTableLocks.value[tableId]
+        if (currentLock != null && currentLock.deviceId != deviceId) {
+            _snackbarMessage.value = "'${currentLock.deviceName}' cihazında masa açık!"
+            return false
+        }
+
+        acquireTableLock(tableId)
         _selectedTableId.value = tableId
         _menuSearchQuery.value = ""
+        return true
+    }
+
+    fun acquireTableLock(tableId: Int) {
+        val entry = TableLockEntry(tableId = tableId, deviceId = deviceId, deviceName = deviceName)
+        val updated = _activeTableLocks.value.toMutableMap()
+        updated[tableId] = entry
+        _activeTableLocks.value = updated
+        if (_deviceRole.value == DeviceRole.SERVER) {
+            server?.broadcastTableLocks(updated.values.toList())
+        } else {
+            client?.sendLockTable(tableId, deviceId, deviceName)
+        }
+    }
+
+    fun releaseTableLock(tableId: Int) {
+        val currentLock = _activeTableLocks.value[tableId]
+        if (currentLock?.deviceId == deviceId) {
+            val updated = _activeTableLocks.value.toMutableMap()
+            updated.remove(tableId)
+            _activeTableLocks.value = updated
+            if (_deviceRole.value == DeviceRole.SERVER) {
+                server?.broadcastTableLocks(updated.values.toList())
+            } else {
+                client?.sendUnlockTable(tableId, deviceId, deviceName)
+            }
+        }
     }
 
     fun selectCategory(categoryId: Int) {
@@ -502,6 +618,9 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sendOrderToKitchen(tableId: Int) {
+        if (!_isKitchenConnected.value) {
+            return
+        }
         val table = allTables.value.find { it.id == tableId } ?: return
         viewModelScope.launch {
             val items = currentOrderItems.value.ifEmpty {
@@ -640,6 +759,8 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         if (_deviceRole.value == DeviceRole.SERVER) {
             viewModelScope.launch {
                 repository.cancelAndClearTable(tableId)
+                releaseTableLock(tableId)
+                _selectedTableId.value = null
                 _snackbarMessage.value = "Masa adisyonu iptal edildi"
                 onComplete()
             }
@@ -651,6 +772,8 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         if (_deviceRole.value == DeviceRole.SERVER) {
             viewModelScope.launch {
                 repository.transferTable(fromId, targetTableId)
+                releaseTableLock(fromId)
+                acquireTableLock(targetTableId)
                 _selectedTableId.value = targetTableId
                 _snackbarMessage.value = "Masa başarıyla aktarıldı"
                 onComplete()

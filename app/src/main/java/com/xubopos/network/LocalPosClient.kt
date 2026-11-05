@@ -17,10 +17,13 @@ class LocalPosClient(
     serverUri: URI,
     private val role: DeviceRole,
     private val deviceName: String,
+    private val deviceId: String = "",
     private val onFullSyncReceived: (FullSyncPayload) -> Unit,
     private val onTablesUpdateReceived: (List<RestaurantTable>) -> Unit,
     private val onKitchenTicketsUpdateReceived: (List<KitchenTicketEntity>) -> Unit,
-    private val onActiveItemsUpdateReceived: (List<OrderItem>) -> Unit = {}
+    private val onActiveItemsUpdateReceived: (List<OrderItem>) -> Unit = {},
+    private val onTableLocksUpdateReceived: (List<TableLockEntry>) -> Unit = {},
+    private val onKitchenStatusUpdateReceived: (Boolean) -> Unit = {}
 ) : WebSocketClient(serverUri) {
 
     private val gson = Gson()
@@ -38,7 +41,8 @@ class LocalPosClient(
         val handshakePacket = NetworkPacket(
             action = "HANDSHAKE",
             role = role.name,
-            senderName = deviceName
+            senderName = deviceName,
+            payload = deviceId
         )
         send(gson.toJson(handshakePacket))
     }
@@ -66,6 +70,15 @@ class LocalPosClient(
                     val type = object : TypeToken<List<OrderItem>>() {}.type
                     val items = gson.fromJson<List<OrderItem>>(packet.payload, type) ?: emptyList()
                     onActiveItemsUpdateReceived(items)
+                }
+                "TABLE_LOCKS_UPDATE" -> {
+                    val type = object : TypeToken<List<TableLockEntry>>() {}.type
+                    val locks = gson.fromJson<List<TableLockEntry>>(packet.payload, type) ?: emptyList()
+                    onTableLocksUpdateReceived(locks)
+                }
+                "KITCHEN_STATUS" -> {
+                    val isKitchenActive = packet.payload.toBoolean()
+                    onKitchenStatusUpdateReceived(isKitchenActive)
                 }
             }
         } catch (e: Exception) {
@@ -99,6 +112,30 @@ class LocalPosClient(
         val payload = UpdateTicketStatusPayload(ticketId = ticketId, status = status)
         val packet = NetworkPacket(
             action = "UPDATE_TICKET_STATUS",
+            role = role.name,
+            senderName = deviceName,
+            payload = gson.toJson(payload)
+        )
+        send(gson.toJson(packet))
+    }
+
+    fun sendLockTable(tableId: Int, deviceId: String, deviceName: String) {
+        if (!isOpen) return
+        val payload = TableLockPayload(tableId, deviceId, deviceName)
+        val packet = NetworkPacket(
+            action = "LOCK_TABLE",
+            role = role.name,
+            senderName = deviceName,
+            payload = gson.toJson(payload)
+        )
+        send(gson.toJson(packet))
+    }
+
+    fun sendUnlockTable(tableId: Int, deviceId: String, deviceName: String) {
+        if (!isOpen) return
+        val payload = TableLockPayload(tableId, deviceId, deviceName)
+        val packet = NetworkPacket(
+            action = "UNLOCK_TABLE",
             role = role.name,
             senderName = deviceName,
             payload = gson.toJson(payload)

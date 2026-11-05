@@ -97,6 +97,8 @@ fun TablesScreen(
     val connectedClientCount by viewModel.connectedClientCount.collectAsState()
     val resolvedServerHost by viewModel.resolvedServerHost.collectAsState()
     val activeTickets by viewModel.activeKitchenTickets.collectAsState()
+    val activeTableLocks by viewModel.activeTableLocks.collectAsState()
+    val myDeviceId = viewModel.deviceId
 
     var showReportDialog by remember { mutableStateOf(false) }
     var showMenuDialog by remember { mutableStateOf(false) }
@@ -390,8 +392,11 @@ fun TablesScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(filteredTables, key = { it.id }) { table ->
+                        val lockEntry = activeTableLocks[table.id]
+                        val lockedByOther = if (lockEntry != null && lockEntry.deviceId != myDeviceId) lockEntry.deviceName else null
                         TableCard(
                             table = table,
+                            lockedBy = lockedByOther,
                             onClick = { onTableClick(table) }
                         )
                     }

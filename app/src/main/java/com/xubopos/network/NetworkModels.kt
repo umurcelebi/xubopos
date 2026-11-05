@@ -47,7 +47,21 @@ data class FullSyncPayload(
     val menuItems: List<MenuItem>,
     val activeTickets: List<KitchenTicketEntity>,
     val activeOrderItems: List<OrderItem> = emptyList(),
-    val restaurantSubtitle: String = ""
+    val restaurantSubtitle: String = "",
+    val tableLocks: List<TableLockEntry> = emptyList(),
+    val isKitchenActive: Boolean = false
+)
+
+data class TableLockEntry(
+    val tableId: Int,
+    val deviceId: String,
+    val deviceName: String
+)
+
+data class TableLockPayload(
+    val tableId: Int,
+    val deviceId: String,
+    val deviceName: String
 )
 
 data class AddOrderPayload(

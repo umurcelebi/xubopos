@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -57,6 +58,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -69,6 +71,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -77,6 +80,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 import com.xubopos.data.model.KitchenTicketEntity
 import com.xubopos.ui.components.formatElapsedMinutes
@@ -85,6 +90,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -109,6 +115,7 @@ import com.xubopos.ui.theme.Emerald700
 import com.xubopos.ui.theme.PureWhite
 import com.xubopos.ui.theme.Rose100
 import com.xubopos.ui.theme.Rose50
+import com.xubopos.ui.theme.Rose500
 import com.xubopos.ui.theme.Rose600
 import com.xubopos.ui.theme.Sky100
 import com.xubopos.ui.theme.Sky50
@@ -143,11 +150,13 @@ fun TableDetailScreen(
     val snackbarMessage by viewModel.snackbarMessage.collectAsState()
     val deviceRole by viewModel.deviceRole.collectAsState()
     val activeKitchenTickets by viewModel.activeKitchenTickets.collectAsState()
+    val isKitchenConnected by viewModel.isKitchenConnected.collectAsState()
 
     var mobileTab by remember { mutableIntStateOf(0) }
     var showPaymentDialog by remember { mutableStateOf(false) }
     var showTransferDialog by remember { mutableStateOf(false) }
     var showCancelConfirm by remember { mutableStateOf(false) }
+    var showNoKitchenPopup by remember { mutableStateOf(false) }
     var editingNoteItem by remember { mutableStateOf<OrderItem?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -160,6 +169,20 @@ fun TableDetailScreen(
     }
 
     val currentTable = table ?: return
+
+    DisposableEffect(currentTable.id) {
+        onDispose {
+            viewModel.releaseTableLock(currentTable.id)
+        }
+    }
+
+    val handleSendKitchen = {
+        if (!isKitchenConnected) {
+            showNoKitchenPopup = true
+        } else {
+            viewModel.sendOrderToKitchen(currentTable.id)
+        }
+    }
     val totalItemCount = orderItems.sumOf { it.quantity }
     val remainingAmount = bill?.remainingAmount ?: 0.0
 
@@ -280,7 +303,7 @@ fun TableDetailScreen(
                         onDecrement = viewModel::decrementItem,
                         onEditNote = { editingNoteItem = it },
                         onOpenPayment = { showPaymentDialog = true },
-                        onSendKitchen = { viewModel.sendOrderToKitchen(currentTable.id) },
+                        onSendKitchen = { handleSendKitchen() },
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
@@ -413,7 +436,7 @@ fun TableDetailScreen(
 
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Button(
-                                                onClick = { viewModel.sendOrderToKitchen(currentTable.id) },
+                                                onClick = { handleSendKitchen() },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Amber600),
                                                 shape = RoundedCornerShape(12.dp)
                                             ) {
@@ -447,7 +470,7 @@ fun TableDetailScreen(
                             onDecrement = viewModel::decrementItem,
                             onEditNote = { editingNoteItem = it },
                             onOpenPayment = { showPaymentDialog = true },
-                            onSendKitchen = { viewModel.sendOrderToKitchen(currentTable.id) },
+                            onSendKitchen = { handleSendKitchen() },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -518,6 +541,82 @@ fun TableDetailScreen(
                 }
             }
         )
+    }
+
+    if (showNoKitchenPopup) {
+        LaunchedEffect(Unit) {
+            delay(2000L)
+            showNoKitchenPopup = false
+        }
+
+        Dialog(
+            onDismissRequest = { showNoKitchenPopup = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Slate900,
+                    shadowElevation = 16.dp,
+                    border = BorderStroke(1.5.dp, Rose500),
+                    modifier = Modifier
+                        .widthIn(max = 380.dp)
+                        .fillMaxWidth(0.9f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Rose500.copy(alpha = 0.15f),
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Restaurant,
+                                    contentDescription = null,
+                                    tint = Rose500,
+                                    modifier = Modifier.size(30.dp)
+                                )
+                            }
+                        }
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Mutfak Modunda Aktif Cihaz Yok",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = PureWhite,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Ağda mutfak takip ekranı (KDS) açık bir cihaz bulunamadı.",
+                                fontSize = 13.sp,
+                                color = Slate300,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = Rose500,
+                            trackColor = Slate800
+                        )
+                    }
+                }
+            }
+        }
     }
 
     editingNoteItem?.let { item ->
