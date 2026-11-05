@@ -313,6 +313,9 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Exception) {}
         server = null
 
+        // UDP Beacon Broadcaster'ı anında başlat
+        nsdHelper?.startBeaconBroadcaster(8887)
+
         try {
             server = LocalPosServer(
                 port = 8887,
@@ -531,7 +534,7 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startClientDiscovery() {
-        if (_connectionStatus.value != ConnectionStatus.CONNECTED) {
+        if (_connectionStatus.value == ConnectionStatus.DISCONNECTED || _connectionStatus.value == ConnectionStatus.ERROR) {
             _connectionStatus.value = ConnectionStatus.SEARCHING
         }
         nsdHelper?.startDiscovery { host, port ->
@@ -543,8 +546,12 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun connectClientToHost(host: String, port: Int = 8887) {
+        if (client?.isOpen == true && _resolvedServerHost.value == host && _connectionStatus.value == ConnectionStatus.CONNECTED) {
+            return
+        }
+
         val now = System.currentTimeMillis()
-        if (now - lastConnectAttemptTime < 1500L && _connectionStatus.value == ConnectionStatus.CONNECTING) {
+        if (now - lastConnectAttemptTime < 3500L && _connectionStatus.value == ConnectionStatus.CONNECTING) {
             return
         }
         lastConnectAttemptTime = now
@@ -624,19 +631,22 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         autoReconnectJob?.cancel()
         autoReconnectJob = viewModelScope.launch {
             while (isActive) {
-                delay(2000L)
+                delay(2500L)
                 val role = _deviceRole.value
                 if (role == DeviceRole.WAITER || role == DeviceRole.KITCHEN) {
                     val isConnected = client?.isOpen == true && _connectionStatus.value == ConnectionStatus.CONNECTED
-                    val isConnectingRecently = _connectionStatus.value == ConnectionStatus.CONNECTING &&
-                        (System.currentTimeMillis() - lastConnectAttemptTime < 2500L)
+                    val isConnecting = _connectionStatus.value == ConnectionStatus.CONNECTING &&
+                        (System.currentTimeMillis() - lastConnectAttemptTime < 3500L)
 
-                    if (!isConnected && !isConnectingRecently) {
+                    if (!isConnected && !isConnecting) {
                         val targetHost = _resolvedServerHost.value ?: prefs.getString("last_server_host", null)
                         if (!targetHost.isNullOrBlank()) {
                             connectClientToHost(targetHost, 8887)
+                        } else {
+                            if (_connectionStatus.value != ConnectionStatus.SEARCHING) {
+                                _connectionStatus.value = ConnectionStatus.SEARCHING
+                            }
                         }
-                        startClientDiscovery()
                     }
                 }
             }

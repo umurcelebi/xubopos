@@ -70,8 +70,10 @@ class PosNsdHelper(private val context: Context) {
     }
 
     fun registerServer(port: Int, onRegistered: () -> Unit = {}) {
-        if (isRegistered) return
         acquireMulticastLock()
+        startBeaconBroadcaster(port)
+
+        if (isRegistered) return
 
         val serviceInfo = NsdServiceInfo().apply {
             serviceName = SERVICE_NAME
@@ -79,50 +81,52 @@ class PosNsdHelper(private val context: Context) {
             this.port = port
         }
 
-        registrationListener = object : NsdManager.RegistrationListener {
-            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
-                isRegistered = true
-                Log.d(TAG, "Server registered: ${serviceInfo.serviceName}")
-                onRegistered()
-            }
+        fun doRegister() {
+            val listener = object : NsdManager.RegistrationListener {
+                override fun onServiceRegistered(registeredInfo: NsdServiceInfo) {
+                    isRegistered = true
+                    Log.d(TAG, "Server registered: ${registeredInfo.serviceName}")
+                    onRegistered()
+                }
 
-            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                Log.e(TAG, "Server registration failed: $errorCode")
-                isRegistered = false
-                helperScope.launch {
-                    delay(2000L)
-                    if (!isRegistered) {
-                        try {
-                            nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener)
-                        } catch (_: Exception) {}
+                override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) {
+                    Log.e(TAG, "Server registration failed: $errorCode")
+                    isRegistered = false
+                    helperScope.launch {
+                        delay(2000L)
+                        if (!isRegistered) {
+                            try {
+                                doRegister()
+                            } catch (_: Exception) {}
+                        }
                     }
                 }
-            }
 
-            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
-                isRegistered = false
-            }
+                override fun onServiceUnregistered(info: NsdServiceInfo) {
+                    isRegistered = false
+                }
 
-            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                isRegistered = false
+                override fun onUnregistrationFailed(info: NsdServiceInfo, errorCode: Int) {
+                    isRegistered = false
+                }
+            }
+            registrationListener = listener
+
+            try {
+                nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, listener)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to register NSD service", e)
             }
         }
 
-        try {
-            nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to register NSD service", e)
-        }
-
-        // UDP Broadcast Beacon başlat (Ağdaki tüm cihazlara 2 saniyede bir IP bildirimi yapar)
-        startBeaconBroadcaster(port)
+        doRegister()
     }
 
     fun startDiscovery(onServerResolved: (host: String, port: Int) -> Unit) {
         acquireMulticastLock()
 
         if (!isDiscovering) {
-            discoveryListener = object : NsdManager.DiscoveryListener {
+            val listener = object : NsdManager.DiscoveryListener {
                 override fun onDiscoveryStarted(regType: String) {
                     isDiscovering = true
                     Log.d(TAG, "Discovery started for $regType")
@@ -149,9 +153,9 @@ class PosNsdHelper(private val context: Context) {
                     Log.e(TAG, "Start discovery failed: $errorCode")
                     helperScope.launch {
                         delay(1500L)
-                        if (!isDiscovering && discoveryListener != null) {
+                        if (!isDiscovering) {
                             try {
-                                nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+                                startDiscovery(onServerResolved)
                             } catch (_: Exception) {}
                         }
                     }
@@ -162,26 +166,26 @@ class PosNsdHelper(private val context: Context) {
                     Log.e(TAG, "Stop discovery failed: $errorCode")
                 }
             }
+            discoveryListener = listener
 
             try {
-                nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+                nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start discovery", e)
             }
         }
 
-        // 2. Katman: UDP Beacon Dinleyici (Sunucu varsa anında 1-2 saniye içinde yakalar)
+        // 2. Katman: UDP Beacon Dinleyici (Arka planda kesintisiz dinler)
         startBeaconListener(onServerResolved)
 
-        // 3. Katman: Subnet Fast Probe (Alt ağdaki 8887 portunu paralel tarar)
-        probeSubnet(onServerResolved)
-
-        // Periyodik olarak (her 8 saniyede bir) subnet probe ve beacon listener'ı canlı tutar
-        periodicDiscoveryJob?.cancel()
-        periodicDiscoveryJob = helperScope.launch {
-            while (isActive) {
-                delay(8000L)
-                probeSubnet(onServerResolved)
+        // 3. Katman: Subnet Fast Probe (8 saniyede bir periyodik tarar)
+        if (periodicDiscoveryJob == null || periodicDiscoveryJob?.isActive != true) {
+            probeSubnet(onServerResolved)
+            periodicDiscoveryJob = helperScope.launch {
+                while (isActive) {
+                    delay(8000L)
+                    probeSubnet(onServerResolved)
+                }
             }
         }
     }
@@ -215,19 +219,26 @@ class PosNsdHelper(private val context: Context) {
         }
     }
 
-    private fun startBeaconBroadcaster(serverPort: Int) {
-        beaconBroadcastJob?.cancel()
+    fun startBeaconBroadcaster(serverPort: Int) {
+        if (beaconBroadcastJob?.isActive == true) return
         beaconBroadcastJob = helperScope.launch {
             var socket: DatagramSocket? = null
             try {
                 socket = DatagramSocket().apply {
                     broadcast = true
                 }
-                val msg = "XUBOPOS_BEACON:$serverPort".toByteArray(Charsets.UTF_8)
                 val generalBroadcast = InetAddress.getByName("255.255.255.255")
 
                 while (isActive) {
                     try {
+                        val myIp = getLocalIpAddress() ?: ""
+                        val msgStr = if (myIp.isNotBlank()) {
+                            "XUBOPOS_BEACON:$serverPort:$myIp"
+                        } else {
+                            "XUBOPOS_BEACON:$serverPort"
+                        }
+                        val msg = msgStr.toByteArray(Charsets.UTF_8)
+
                         socket.send(DatagramPacket(msg, msg.size, generalBroadcast, UDP_BEACON_PORT))
                         val subnetBroadcasts = getAllBroadcastAddresses()
                         for (broadcastAddr in subnetBroadcasts) {
@@ -236,7 +247,7 @@ class PosNsdHelper(private val context: Context) {
                             } catch (_: Exception) {}
                         }
                     } catch (_: Exception) {}
-                    delay(2000L)
+                    delay(1500L)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Beacon broadcaster error", e)
@@ -247,7 +258,7 @@ class PosNsdHelper(private val context: Context) {
     }
 
     private fun startBeaconListener(onServerFound: (host: String, port: Int) -> Unit) {
-        beaconListenJob?.cancel()
+        if (beaconListenJob?.isActive == true) return
         beaconListenJob = helperScope.launch {
             var socket: DatagramSocket? = null
             try {
@@ -264,10 +275,11 @@ class PosNsdHelper(private val context: Context) {
                         socket.receive(packet)
                         val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
                         if (text.startsWith("XUBOPOS_BEACON")) {
-                            val senderIp = packet.address?.hostAddress
                             val parts = text.split(":")
                             val sPort = if (parts.size >= 2) parts[1].toIntOrNull() ?: 8887 else 8887
-                            if (!senderIp.isNullOrBlank()) {
+                            val explicitIp = if (parts.size >= 3 && parts[2].isNotBlank()) parts[2] else null
+                            val senderIp = explicitIp ?: packet.address?.hostAddress
+                            if (!senderIp.isNullOrBlank() && senderIp != "127.0.0.1") {
                                 Log.d(TAG, "Server resolved via UDP Beacon: $senderIp:$sPort")
                                 onServerFound(senderIp, sPort)
                             }
@@ -296,7 +308,7 @@ class PosNsdHelper(private val context: Context) {
                         if (testIp != myIp) {
                             try {
                                 Socket().use { s ->
-                                    s.connect(InetSocketAddress(testIp, 8887), 250)
+                                    s.connect(InetSocketAddress(testIp, 8887), 450)
                                     Log.d(TAG, "Server found via Subnet Probe: $testIp:8887")
                                     onServerFound(testIp, 8887)
                                 }
@@ -361,6 +373,7 @@ class PosNsdHelper(private val context: Context) {
                 isRegistered = false
             }
         } catch (_: Exception) {}
+        registrationListener = null
 
         try {
             if (isDiscovering && discoveryListener != null) {
@@ -368,6 +381,7 @@ class PosNsdHelper(private val context: Context) {
                 isDiscovering = false
             }
         } catch (_: Exception) {}
+        discoveryListener = null
 
         releaseMulticastLock()
     }

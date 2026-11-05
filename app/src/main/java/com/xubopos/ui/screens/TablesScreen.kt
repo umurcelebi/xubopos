@@ -189,7 +189,7 @@ fun TablesScreen(
                             )
                         }
 
-                        // Cihaz Modu Rozeti (Garson ve Mutfak Modunda Tıklanabilir)
+                        // Cihaz Modu Rozeti (Tüm Modlarda Tıklanabilir)
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = when (deviceRole) {
@@ -197,11 +197,9 @@ fun TablesScreen(
                                 DeviceRole.WAITER -> Sky500
                                 DeviceRole.KITCHEN -> Emerald500
                             },
-                            modifier = if (deviceRole != DeviceRole.SERVER) {
-                                Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { onOpenRoleSettings() }
-                            } else Modifier
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onOpenRoleSettings() }
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
