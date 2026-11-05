@@ -119,7 +119,8 @@ fun POSApp() {
             screen == AppScreen.MANAGEMENT -> {
                 ManagementScreen(
                     viewModel = viewModel,
-                    onBack = { viewModel.navigateTo(AppScreen.TABLES) }
+                    onBack = { viewModel.navigateTo(AppScreen.TABLES) },
+                    onOpenRoleSettings = { showRoleDialog = true }
                 )
             }
             screen == AppScreen.KITCHEN || deviceRole == DeviceRole.KITCHEN -> {

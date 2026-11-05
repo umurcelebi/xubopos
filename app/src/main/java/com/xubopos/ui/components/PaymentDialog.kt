@@ -2,6 +2,8 @@ package com.xubopos.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -71,6 +73,7 @@ import com.xubopos.ui.theme.Sky600
 import com.xubopos.ui.theme.Sky700
 import com.xubopos.ui.theme.Slate100
 import com.xubopos.ui.theme.Slate200
+import com.xubopos.ui.theme.Slate400
 import com.xubopos.ui.theme.Slate500
 import com.xubopos.ui.theme.Slate700
 import com.xubopos.ui.theme.Slate800
@@ -150,13 +153,19 @@ fun PaymentDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Slate100,
-                    modifier = Modifier.fillMaxWidth()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
                 ) {
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Slate100,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -297,11 +306,7 @@ fun PaymentDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = false)
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     when (selectedTab) {
                         0 -> {
                             Surface(
@@ -574,6 +579,8 @@ fun PaymentDialog(
                     )
                 }
 
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
 
                 val paymentNote = when (selectedTab) {
@@ -584,7 +591,9 @@ fun PaymentDialog(
                 }
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Button(
@@ -602,16 +611,22 @@ fun PaymentDialog(
                         enabled = amountToPay > 0.0,
                         modifier = Modifier
                             .weight(1f)
-                            .height(54.dp),
+                            .height(52.dp),
                         shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Emerald600,
+                            contentColor = PureWhite,
+                            disabledContainerColor = Slate200,
+                            disabledContentColor = Slate400
+                        )
                     ) {
-                        Icon(imageVector = Icons.Default.Payments, contentDescription = null)
+                        Icon(imageVector = Icons.Default.Payments, contentDescription = null, tint = PureWhite)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "NAKİT AL",
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp
+                            fontSize = 15.sp,
+                            color = PureWhite
                         )
                     }
 
@@ -630,16 +645,22 @@ fun PaymentDialog(
                         enabled = amountToPay > 0.0,
                         modifier = Modifier
                             .weight(1f)
-                            .height(54.dp),
+                            .height(52.dp),
                         shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Sky600)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Sky600,
+                            contentColor = PureWhite,
+                            disabledContainerColor = Slate200,
+                            disabledContentColor = Slate400
+                        )
                     ) {
-                        Icon(imageVector = Icons.Default.CreditCard, contentDescription = null)
+                        Icon(imageVector = Icons.Default.CreditCard, contentDescription = null, tint = PureWhite)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "KART / POS",
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp
+                            fontSize = 15.sp,
+                            color = PureWhite
                         )
                     }
                 }

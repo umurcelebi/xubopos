@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -105,6 +106,7 @@ import com.xubopos.ui.theme.Emerald500
 import com.xubopos.ui.theme.Emerald600
 import com.xubopos.ui.theme.Emerald700
 import com.xubopos.ui.theme.PureWhite
+import com.xubopos.ui.theme.Rose100
 import com.xubopos.ui.theme.Rose50
 import com.xubopos.ui.theme.Rose500
 import com.xubopos.ui.theme.Rose600
@@ -324,6 +326,7 @@ fun ManagementScreen(
                 2 -> SalesReportTab(
                     selectedPeriod = selectedPeriod,
                     report = detailedReport,
+                    tables = tables,
                     onSelectPeriod = viewModel::selectReportPeriod,
                     onCloseDay = viewModel::closeDay
                 )
@@ -1121,11 +1124,13 @@ private fun TableManagementTab(
 private fun SalesReportTab(
     selectedPeriod: ReportPeriod,
     report: DetailedSalesReport,
+    tables: List<RestaurantTable>,
     onSelectPeriod: (ReportPeriod) -> Unit,
     onCloseDay: () -> Unit
 ) {
     val dateFormatter = remember { SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()) }
     var showCloseDayDialog by remember { mutableStateOf(false) }
+    var showOpenTablesWarningDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1175,7 +1180,14 @@ private fun SalesReportTab(
                         )
                     }
                     Button(
-                        onClick = { showCloseDayDialog = true },
+                        onClick = {
+                            val hasOpenTables = tables.any { it.isOccupied }
+                            if (hasOpenTables) {
+                                showOpenTablesWarningDialog = true
+                            } else {
+                                showCloseDayDialog = true
+                            }
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = Amber600),
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
@@ -1530,6 +1542,86 @@ private fun SalesReportTab(
             dismissButton = {
                 TextButton(onClick = { showCloseDayDialog = false }) {
                     Text("Vazgeç")
+                }
+            }
+        )
+    }
+
+    if (showOpenTablesWarningDialog) {
+        val openTables = tables.filter { it.isOccupied }
+        AlertDialog(
+            onDismissRequest = { showOpenTablesWarningDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.TableRestaurant,
+                    contentDescription = null,
+                    tint = Rose600,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Açık Masa Var - Gün Kapatılamaz",
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Slate900
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Günü kapatabilmek için önce tüm açık masaların hesaplarının tahsil edilip kapatılması veya iptal edilmesi gerekmektedir.",
+                        fontSize = 13.sp,
+                        color = Slate700
+                    )
+                    Text(
+                        text = "Açık Masalar (${openTables.size} Masa):",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = Rose600
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Rose50,
+                        border = BorderStroke(1.dp, Rose100),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 160.dp)
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(openTables, key = { it.id }) { tbl ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "• ${tbl.name} (${tbl.zone})",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = Slate900
+                                    )
+                                    Text(
+                                        text = "₺${"%.2f".format(tbl.remainingAmount)}",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 12.sp,
+                                        color = Amber700
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showOpenTablesWarningDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate900)
+                ) {
+                    Text("Anladım")
                 }
             }
         )

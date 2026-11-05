@@ -88,6 +88,8 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     private val _remoteKitchenTickets = MutableStateFlow<List<KitchenTicketEntity>>(emptyList())
     private val _remoteActiveItems = MutableStateFlow<List<OrderItem>>(emptyList())
 
+    private val _lastDayCloseTime = MutableStateFlow(prefs.getLong("last_day_close_time", 0L))
+
     val allTables: StateFlow<List<RestaurantTable>>
     val allCategories: StateFlow<List<MenuCategory>>
     val allMenuItems: StateFlow<List<MenuItem>>
@@ -162,7 +164,7 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             if (role == DeviceRole.SERVER) local else remote
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-        dailyReport = repository.getDailyReportFlow().stateIn(
+        dailyReport = repository.getDailyReportFlow(_lastDayCloseTime).stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5000),
             DailyReport()
@@ -417,6 +419,7 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             .putLong("last_day_close_time", now)
             .putString("last_stock_reset_date", todayStr)
             .apply()
+        _lastDayCloseTime.value = now
         viewModelScope.launch {
             repository.resetDailyStockLimits()
             refreshDetailedReport()

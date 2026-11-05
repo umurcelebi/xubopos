@@ -2,9 +2,13 @@ package com.xubopos.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -96,216 +101,272 @@ fun DeviceRoleDialog(
             shape = RoundedCornerShape(24.dp),
             color = PureWhite
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val isWide = maxWidth >= 580.dp
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(if (isWide) 16.dp else 20.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = Slate900,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Wifi,
-                                    contentDescription = null,
-                                    tint = Amber500,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        Column {
-                            Text(
-                                text = "Ağ & Cihaz Çalışma Modu",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Slate900
-                            )
-                            Text(
-                                text = "İnternetsiz yerel Wi-Fi ağı üzerinden çoklu cihaz",
-                                fontSize = 11.sp,
-                                color = Slate500
-                            )
-                        }
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Kapat")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = Slate100,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(
-                                text = "Şu Anki Durum:",
-                                fontSize = 11.sp,
-                                color = Slate500
-                            )
-                            Text(
-                                text = "${currentRole.title} (${currentRole.badge})",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Slate900
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (currentRole == DeviceRole.SERVER) Slate800 else Emerald100
-                        ) {
-                            Text(
-                                text = if (currentRole == DeviceRole.SERVER) {
-                                    "$connectedClientCount Bağlantı"
-                                } else {
-                                    if (connectionStatus == ConnectionStatus.CONNECTED) "Bağlı" else "Aranıyor"
-                                },
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (currentRole == DeviceRole.SERVER) Amber500 else Emerald700,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-                Text(
-                    text = "Bu cihazın çalışma rolünü seçin:",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Slate700
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    RoleOptionCard(
-                        title = "1. Ana Kasa & Sunucu",
-                        badge = "KASA",
-                        description = "Ana veritabanını tutar. Yerel ağda mDNS ile 'Xubopos-Server' yayını yapar. Tüm adisyon ve tahsilat yetkisine sahiptir.",
-                        icon = Icons.Default.PointOfSale,
-                        isSelected = selectedRole == DeviceRole.SERVER,
-                        badgeBg = Amber100,
-                        badgeColor = Amber700,
-                        onClick = { selectedRole = DeviceRole.SERVER }
-                    )
-
-                    RoleOptionCard(
-                        title = "2. Garson Terminali",
-                        badge = "GARSON",
-                        description = "Ana kasayı Wi-Fi'da isimden otomatik bulur. Masaları görür, sipariş alır ve mutfağa iletir.",
-                        icon = Icons.Default.Smartphone,
-                        isSelected = selectedRole == DeviceRole.WAITER,
-                        badgeBg = Sky100,
-                        badgeColor = Sky700,
-                        onClick = { selectedRole = DeviceRole.WAITER }
-                    )
-
-                    RoleOptionCard(
-                        title = "3. Mutfak Takip Ekranı (KDS)",
-                        badge = "MUTFAK",
-                        description = "Aşçı ve bar hazırlık ekranı. Yeni siparişler sesli uyarıyla düşer, hazırlık aşamaları dokunarak yönetilir.",
-                        icon = Icons.Default.Restaurant,
-                        isSelected = selectedRole == DeviceRole.KITCHEN,
-                        badgeBg = Emerald100,
-                        badgeColor = Emerald700,
-                        onClick = { selectedRole = DeviceRole.KITCHEN }
-                    )
-                }
-
-                if (selectedRole != DeviceRole.SERVER) {
-                    Spacer(modifier = Modifier.height(10.dp))
+                    // 1. BAŞLIK
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "mDNS otomatik eşleşme aktiftir (IP gerekmez)",
-                            fontSize = 11.sp,
-                            color = Emerald700,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        OutlinedButton(
-                            onClick = { showManualIp = !showManualIp },
-                            shape = RoundedCornerShape(8.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = if (showManualIp) "Kapat" else "Manuel IP",
-                                fontSize = 11.sp
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Slate900,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Wifi,
+                                        contentDescription = null,
+                                        tint = Amber500,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Column {
+                                Text(
+                                    text = "Ağ & Cihaz Çalışma Modu",
+                                    fontSize = if (isWide) 17.sp else 18.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate900
+                                )
+                                Text(
+                                    text = "İnternetsiz yerel Wi-Fi ağı üzerinden çoklu cihaz",
+                                    fontSize = 11.sp,
+                                    color = Slate500
+                                )
+                            }
+                        }
+                        IconButton(onClick = onDismiss) {
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Kapat")
                         }
                     }
 
-                    if (showManualIp) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 2. KAYDIRILABİLİR İÇERİK
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Slate100,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            OutlinedTextField(
-                                value = manualIpInput,
-                                onValueChange = { manualIpInput = it },
-                                label = { Text("Sunucu IP'si (Örn: 192.168.1.45)") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.weight(1f)
-                            )
-                            Button(
-                                onClick = {
-                                    if (manualIpInput.isNotBlank()) {
-                                        onConnectManualIp(manualIpInput.trim())
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Slate900)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Bağlan")
+                                Column {
+                                    Text(
+                                        text = "Şu Anki Durum:",
+                                        fontSize = 10.sp,
+                                        color = Slate500
+                                    )
+                                    Text(
+                                        text = "${currentRole.title} (${currentRole.badge})",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Slate900
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (currentRole == DeviceRole.SERVER) Slate800 else Emerald100
+                                ) {
+                                    Text(
+                                        text = if (currentRole == DeviceRole.SERVER) {
+                                            "$connectedClientCount Bağlantı"
+                                        } else {
+                                            if (connectionStatus == ConnectionStatus.CONNECTED) "Bağlı" else "Aranıyor"
+                                        },
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (currentRole == DeviceRole.SERVER) Amber500 else Emerald700,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Bu cihazın çalışma rolünü seçin:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate700
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        if (isWide) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                RoleOptionCard(
+                                    title = "1. Ana Kasa & Sunucu",
+                                    badge = "KASA",
+                                    description = "Ana veritabanını tutar, mDNS ile yayın yapar.",
+                                    icon = Icons.Default.PointOfSale,
+                                    isSelected = selectedRole == DeviceRole.SERVER,
+                                    badgeBg = Amber100,
+                                    badgeColor = Amber700,
+                                    onClick = { selectedRole = DeviceRole.SERVER },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                RoleOptionCard(
+                                    title = "2. Garson Terminali",
+                                    badge = "GARSON",
+                                    description = "Wi-Fi'da kasayı bulur, masadan sipariş alır.",
+                                    icon = Icons.Default.Smartphone,
+                                    isSelected = selectedRole == DeviceRole.WAITER,
+                                    badgeBg = Sky100,
+                                    badgeColor = Sky700,
+                                    onClick = { selectedRole = DeviceRole.WAITER },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                RoleOptionCard(
+                                    title = "3. Mutfak Takip (KDS)",
+                                    badge = "MUTFAK",
+                                    description = "Aşçı ve bar hazırlık ekranı, fişleri yönetir.",
+                                    icon = Icons.Default.Restaurant,
+                                    isSelected = selectedRole == DeviceRole.KITCHEN,
+                                    badgeBg = Emerald100,
+                                    badgeColor = Emerald700,
+                                    onClick = { selectedRole = DeviceRole.KITCHEN },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                RoleOptionCard(
+                                    title = "1. Ana Kasa & Sunucu",
+                                    badge = "KASA",
+                                    description = "Ana veritabanını tutar. Yerel ağda mDNS ile 'Xubopos-Server' yayını yapar. Tüm adisyon ve tahsilat yetkisine sahiptir.",
+                                    icon = Icons.Default.PointOfSale,
+                                    isSelected = selectedRole == DeviceRole.SERVER,
+                                    badgeBg = Amber100,
+                                    badgeColor = Amber700,
+                                    onClick = { selectedRole = DeviceRole.SERVER }
+                                )
+
+                                RoleOptionCard(
+                                    title = "2. Garson Terminali",
+                                    badge = "GARSON",
+                                    description = "Ana kasayı Wi-Fi'da isimden otomatik bulur. Masaları görür, sipariş alır ve mutfağa iletir.",
+                                    icon = Icons.Default.Smartphone,
+                                    isSelected = selectedRole == DeviceRole.WAITER,
+                                    badgeBg = Sky100,
+                                    badgeColor = Sky700,
+                                    onClick = { selectedRole = DeviceRole.WAITER }
+                                )
+
+                                RoleOptionCard(
+                                    title = "3. Mutfak Takip Ekranı (KDS)",
+                                    badge = "MUTFAK",
+                                    description = "Aşçı ve bar hazırlık ekranı. Yeni siparişler sesli uyarıyla düşer, hazırlık aşamaları dokunarak yönetilir.",
+                                    icon = Icons.Default.Restaurant,
+                                    isSelected = selectedRole == DeviceRole.KITCHEN,
+                                    badgeBg = Emerald100,
+                                    badgeColor = Emerald700,
+                                    onClick = { selectedRole = DeviceRole.KITCHEN }
+                                )
+                            }
+                        }
+
+                        if (selectedRole != DeviceRole.SERVER) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "mDNS otomatik eşleşme aktiftir (IP gerekmez)",
+                                    fontSize = 11.sp,
+                                    color = Emerald700,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                OutlinedButton(
+                                    onClick = { showManualIp = !showManualIp },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = if (showManualIp) "Kapat" else "Manuel IP",
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+
+                            if (showManualIp) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = manualIpInput,
+                                        onValueChange = { manualIpInput = it },
+                                        label = { Text("Sunucu IP'si (Örn: 192.168.1.45)") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            if (manualIpInput.isNotBlank()) {
+                                                onConnectManualIp(manualIpInput.trim())
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Slate900)
+                                    ) {
+                                        Text("Bağlan")
+                                    }
+                                }
                             }
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = Slate200)
-                Spacer(modifier = Modifier.height(12.dp))
+                    // 3. TABANA SABİTLENMİŞ ONAY BUTONU
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = Slate200)
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                Button(
-                    onClick = {
-                        onSelectRole(selectedRole)
-                        onDismiss()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Slate900)
-                ) {
-                    Text(
-                        text = if (selectedRole == currentRole) "Bu Modda Devam Et" else "Seçilen Role Geç (${selectedRole.badge})",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp
-                    )
+                    Button(
+                        onClick = {
+                            onSelectRole(selectedRole)
+                            onDismiss()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Slate900)
+                    ) {
+                        Text(
+                            text = if (selectedRole == currentRole) "Bu Modda Devam Et" else "Seçilen Role Geç (${selectedRole.badge})",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp
+                        )
+                    }
                 }
             }
         }
@@ -321,10 +382,11 @@ private fun RoleOptionCard(
     isSelected: Boolean,
     badgeBg: androidx.compose.ui.graphics.Color,
     badgeColor: androidx.compose.ui.graphics.Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .clickable { onClick() },
@@ -340,21 +402,21 @@ private fun RoleOptionCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(10.dp),
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Surface(
                 shape = RoundedCornerShape(10.dp),
                 color = if (isSelected) Slate900 else Slate100,
-                modifier = Modifier.size(38.dp)
+                modifier = Modifier.size(34.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
                         tint = if (isSelected) PureWhite else Slate700,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
@@ -362,13 +424,15 @@ private fun RoleOptionCard(
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         text = title,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Slate900
+                        color = Slate900,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Surface(
                         shape = RoundedCornerShape(6.dp),
@@ -376,10 +440,10 @@ private fun RoleOptionCard(
                     ) {
                         Text(
                             text = badge,
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = badgeColor,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                         )
                     }
                 }
@@ -388,16 +452,18 @@ private fun RoleOptionCard(
                     text = description,
                     fontSize = 11.sp,
                     color = Slate500,
-                    lineHeight = 15.sp
+                    lineHeight = 14.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
             if (isSelected) {
                 Icon(
                     imageVector = Icons.Default.CheckCircle,
-                    contentDescription = "Seçildi",
+                    contentDescription = null,
                     tint = Slate900,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

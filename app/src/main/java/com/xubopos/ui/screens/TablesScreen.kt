@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -143,49 +144,49 @@ fun TablesScreen(
                         .statusBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 14.dp)
                 ) {
-                    // 1. SATIR: Sol: Logo & Restoran Adı | Sağ: Cihaz Modu Rozeti (Tıklanabilir, Asla Taşmaz)
+                    // 1. SATIR: Sol: Restoran Adı (Büyük ve Dinamik Ölçeklenen) | Sağ: Cihaz Modu Rozeti
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f, fill = false)
+                        BoxWithConstraints(
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .padding(end = 12.dp),
+                            contentAlignment = Alignment.CenterStart
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Amber500,
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.PointOfSale,
-                                        contentDescription = null,
-                                        tint = Slate900,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
+                            var titleFontSize by remember(restaurantName, maxWidth) { mutableStateOf(26.sp) }
+
                             Text(
                                 text = restaurantName,
-                                fontSize = 20.sp,
+                                fontSize = titleFontSize,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = PureWhite,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                onTextLayout = { textLayoutResult ->
+                                    if (textLayoutResult.hasVisualOverflow && titleFontSize > 13.sp) {
+                                        titleFontSize = (titleFontSize.value - 1.5f).sp
+                                    }
+                                }
                             )
                         }
 
-                        // Cihaz Modu Rozeti (Sadece Görüntüleme)
+                        // Cihaz Modu Rozeti (Sadece Mutfak Modunda Ana Ekranda Değiştirilebilir)
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = when (deviceRole) {
                                 DeviceRole.SERVER -> Amber500
                                 DeviceRole.WAITER -> Sky500
                                 DeviceRole.KITCHEN -> Emerald500
-                            }
+                            },
+                            modifier = if (deviceRole == DeviceRole.KITCHEN) {
+                                Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onOpenRoleSettings() }
+                            } else Modifier
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
@@ -202,7 +203,7 @@ fun TablesScreen(
                                     text = when (deviceRole) {
                                         DeviceRole.SERVER -> "KASA (SUNUCU)"
                                         DeviceRole.WAITER -> "GARSON MODU"
-                                        DeviceRole.KITCHEN -> "MUTFAK MODU"
+                                        DeviceRole.KITCHEN -> "MUTFAK (MOD DEĞİŞTİR)"
                                     },
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Black,
@@ -212,75 +213,79 @@ fun TablesScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-
                     // 2. SATIR: Mutfak, Yönetim, Kasa Butonları (Dikey modda ekrana dengeli yayılır)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FilledTonalButton(
-                            onClick = onNavigateKitchen,
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = if (activeTickets.isNotEmpty()) Amber600 else Slate800,
-                                contentColor = PureWhite
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Restaurant,
-                                contentDescription = "Mutfak",
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Mutfak" + if (activeTickets.isNotEmpty()) " (${activeTickets.size})" else "",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-                        }
+                    if (deviceRole == DeviceRole.KITCHEN || deviceRole == DeviceRole.SERVER) {
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                        if (deviceRole == DeviceRole.SERVER) {
-                            FilledTonalButton(
-                                onClick = onNavigateManagement,
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = Slate800,
-                                    contentColor = PureWhite
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = "Yönetim",
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Yönetim", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (deviceRole == DeviceRole.KITCHEN) {
+                                FilledTonalButton(
+                                    onClick = onNavigateKitchen,
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = if (activeTickets.isNotEmpty()) Amber600 else Slate800,
+                                        contentColor = PureWhite
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Restaurant,
+                                        contentDescription = "Mutfak",
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Mutfak" + if (activeTickets.isNotEmpty()) " (${activeTickets.size})" else "",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                }
                             }
 
-                            FilledTonalButton(
-                                onClick = { showReportDialog = true },
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = Slate800,
-                                    contentColor = PureWhite
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Assessment,
-                                    contentDescription = "Kasa Raporu",
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Kasa", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            if (deviceRole == DeviceRole.SERVER) {
+                                FilledTonalButton(
+                                    onClick = onNavigateManagement,
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = Slate800,
+                                        contentColor = PureWhite
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Settings,
+                                        contentDescription = "Yönetim",
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Yönetim", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
+
+                                FilledTonalButton(
+                                    onClick = { showReportDialog = true },
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = Slate800,
+                                        contentColor = PureWhite
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Assessment,
+                                        contentDescription = "Kasa Raporu",
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Kasa", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
                             }
                         }
                     }

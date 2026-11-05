@@ -149,14 +149,6 @@ fun KitchenScreen(
         mutableStateOf(activity?.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
     }
 
-    val liveClock by produceState(initialValue = "") {
-        val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-        while (true) {
-            value = sdf.format(java.util.Date())
-            delay(1000L)
-        }
-    }
-
     val currentTimeMillis by produceState(initialValue = System.currentTimeMillis()) {
         while (true) {
             delay(5000L)
@@ -228,10 +220,11 @@ fun KitchenScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f, fill = false)
                         ) {
                             if (role == DeviceRole.SERVER) {
-                                IconButton(onClick = onBack) {
+                                IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                         contentDescription = "Geri",
@@ -242,106 +235,105 @@ fun KitchenScreen(
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = Amber500,
-                                modifier = Modifier.size(42.dp)
+                                modifier = Modifier.size(38.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.Restaurant,
                                         contentDescription = null,
                                         tint = Slate900,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
                             }
                             Column {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = "Mutfak Takip Ekranı (KDS)",
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = PureWhite
-                                    )
-                                    if (liveClock.isNotBlank()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = Slate800
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.AccessTime,
-                                                    contentDescription = null,
-                                                    tint = Amber500,
-                                                    modifier = Modifier.size(12.dp)
-                                                )
-                                                Text(
-                                                    text = liveClock,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = Amber500
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
                                 Text(
-                                    text = "Aşçı & Bar Hazırlık İstasyonu • ${tickets.size} Aktif Fiş",
+                                    text = "Mutfak (KDS)",
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = PureWhite
+                                )
+                                Text(
+                                    text = "${tickets.size} Aktif Sipariş Fişi",
                                     fontSize = 11.sp,
                                     color = Slate400
                                 )
                             }
+
+                            Spacer(modifier = Modifier.width(4.dp))
+
+                            ConnectionStatusPill(
+                                role = role,
+                                status = connectionStatus,
+                                connectedClientsCount = connectedClientsCount,
+                                serverHost = serverHostName,
+                                onClick = onOpenRoleSettings
+                            )
                         }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            ConnectionStatusPill(
-                                role = role,
-                                status = connectionStatus,
-                                connectedClientsCount = connectedClientsCount,
-                                serverHost = serverHostName
-                            )
-
-                            // Tablet Yatay Mod Kilit Butonu
-                            IconButton(onClick = {
-                                activity?.let {
-                                    if (isLandscapeLocked) {
-                                        it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                                        isLandscapeLocked = false
-                                    } else {
-                                        it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                                        isLandscapeLocked = true
-                                    }
-                                }
-                            }) {
-                                Icon(
-                                    imageVector = Icons.Default.ScreenRotation,
-                                    contentDescription = "Yatay Ekran Modu",
-                                    tint = if (isLandscapeLocked) Amber500 else PureWhite
-                                )
-                            }
-
-                            IconButton(onClick = { soundEnabled = !soundEnabled }) {
+                            // Ses butonu
+                            IconButton(
+                                onClick = { soundEnabled = !soundEnabled },
+                                modifier = Modifier.size(36.dp)
+                            ) {
                                 Icon(
                                     imageVector = if (soundEnabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
                                     contentDescription = "Zil Sesi",
-                                    tint = if (soundEnabled) Amber500 else Slate500
+                                    tint = if (soundEnabled) Amber500 else Slate500,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
-                            IconButton(onClick = onOpenRoleSettings) {
+                            // Tablet Yatay Mod Kilit Butonu
+                            IconButton(
+                                onClick = {
+                                    activity?.let {
+                                        if (isLandscapeLocked) {
+                                            it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                            isLandscapeLocked = false
+                                        } else {
+                                            it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                            isLandscapeLocked = true
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = "Rol / Ağ Ayarları",
-                                    tint = PureWhite
+                                    imageVector = Icons.Default.ScreenRotation,
+                                    contentDescription = "Yatay Ekran Modu",
+                                    tint = if (isLandscapeLocked) Amber500 else PureWhite,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            // BELİRGİN MOD DEĞİŞTİR BUTONU
+                            Button(
+                                onClick = onOpenRoleSettings,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Amber500,
+                                    contentColor = Slate900
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Wifi,
+                                    contentDescription = null,
+                                    tint = Slate900,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "Mod Değiştir",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate900
                                 )
                             }
                         }
@@ -793,7 +785,8 @@ fun ConnectionStatusPill(
     role: DeviceRole,
     status: ConnectionStatus,
     connectedClientsCount: Int,
-    serverHost: String?
+    serverHost: String?,
+    onClick: (() -> Unit)? = null
 ) {
     val (bgColor, dotColor, text) = when {
         role == DeviceRole.SERVER -> {
@@ -835,7 +828,12 @@ fun ConnectionStatusPill(
 
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = bgColor
+        color = bgColor,
+        modifier = if (onClick != null) {
+            Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { onClick() }
+        } else Modifier
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -854,6 +852,15 @@ fun ConnectionStatusPill(
                 fontWeight = FontWeight.Bold,
                 color = if (role == DeviceRole.SERVER) PureWhite else Slate800
             )
+            if (onClick != null) {
+                Spacer(modifier = Modifier.width(2.dp))
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Rol / Ağ Ayarları",
+                    tint = dotColor,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
         }
     }
 }

@@ -1381,17 +1381,20 @@ private fun BillTicketSection(
                         onClick = onOpenPayment,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp)
-                            .navigationBarsPadding(),
+                            .height(52.dp),
                         shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Slate900)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Emerald600,
+                            contentColor = PureWhite
+                        )
                     ) {
-                        Icon(imageVector = Icons.Default.Payments, contentDescription = null)
+                        Icon(imageVector = Icons.Default.Payments, contentDescription = null, tint = PureWhite)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "ÖDEME AL / HESAP BÖL",
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            color = PureWhite
                         )
                     }
                 }

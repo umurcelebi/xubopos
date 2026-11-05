@@ -35,31 +35,43 @@ class POSRepository(private val dao: RestaurantDao) {
 
     fun getPaymentsForBill(billId: Long): Flow<List<PaymentRecord>> = dao.getPaymentsForBill(billId)
 
-    fun getDailyReportFlow(): Flow<DailyReport> {
+    fun getDailyReportFlow(lastCloseTimeFlow: Flow<Long>): Flow<DailyReport> {
         return combine(
             dao.getClosedBills(),
             dao.getOpenBills(),
             dao.getAllRecentPayments(),
-            dao.getTopSellingItems()
-        ) { closed, open, payments, topItems ->
-            val cashTotal = payments
+            dao.getTopSellingItems(),
+            lastCloseTimeFlow
+        ) { closed, open, payments, topItems, lastClose ->
+            val calendarStartOfDay = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val effectiveStartTime = maxOf(calendarStartOfDay, lastClose)
+
+            val todaysPayments = payments.filter { it.paidAt >= effectiveStartTime }
+            val todaysClosed = closed.filter { (it.closedAt ?: 0L) >= effectiveStartTime }
+
+            val cashTotal = todaysPayments
                 .filter { it.paymentMethod == "NAKİT" }
                 .sumOf { it.amount }
-            val cardTotal = payments
+            val cardTotal = todaysPayments
                 .filter { it.paymentMethod == "KART" }
                 .sumOf { it.amount }
-            val totalRevenue = payments.sumOf { it.amount }
+            val totalRevenue = todaysPayments.sumOf { it.amount }
             val openTablesTotal = open.sumOf { it.remainingAmount }
 
             DailyReport(
                 totalRevenue = totalRevenue,
                 cashTotal = cashTotal,
                 cardTotal = cardTotal,
-                closedOrderCount = closed.size,
+                closedOrderCount = todaysClosed.size,
                 openOrderCount = open.size,
                 openTablesTotal = openTablesTotal,
                 topItems = topItems,
-                recentPayments = payments.take(15)
+                recentPayments = todaysPayments.take(15)
             )
         }
     }
