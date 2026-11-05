@@ -281,7 +281,12 @@ fun KitchenScreen(
                                 status = connectionStatus,
                                 connectedClientsCount = connectedClientsCount,
                                 serverHost = serverHostName,
-                                onClick = onOpenRoleSettings
+                                onClick = {
+                                    if (connectionStatus != ConnectionStatus.CONNECTED) {
+                                        viewModel.retryConnection()
+                                    }
+                                    onOpenRoleSettings()
+                                }
                             )
                         }
 
@@ -339,7 +344,12 @@ fun KitchenScreen(
 
                             // BELİRGİN MOD DEĞİŞTİR BUTONU
                             Button(
-                                onClick = onOpenRoleSettings,
+                                onClick = {
+                                    if (connectionStatus != ConnectionStatus.CONNECTED) {
+                                        viewModel.retryConnection()
+                                    }
+                                    onOpenRoleSettings()
+                                },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Amber500,
                                     contentColor = Slate900

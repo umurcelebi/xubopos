@@ -42,6 +42,8 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -79,7 +81,9 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     private val _connectedClientCount = MutableStateFlow(0)
     val connectedClientCount: StateFlow<Int> = _connectedClientCount.asStateFlow()
 
-    private val _resolvedServerHost = MutableStateFlow<String?>(null)
+    private val _resolvedServerHost = MutableStateFlow<String?>(
+        prefs.getString("last_server_host", null)
+    )
     val resolvedServerHost: StateFlow<String?> = _resolvedServerHost.asStateFlow()
 
     private val _restaurantName = MutableStateFlow(
@@ -158,6 +162,7 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
 
     private var server: LocalPosServer? = null
     private var client: LocalPosClient? = null
+    private var clientStatusJob: Job? = null
     private var nsdHelper: PosNsdHelper? = null
 
     init {
@@ -268,7 +273,16 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
 
         when (_deviceRole.value) {
             DeviceRole.SERVER -> startServer()
-            DeviceRole.WAITER, DeviceRole.KITCHEN -> startClientDiscovery()
+            DeviceRole.WAITER, DeviceRole.KITCHEN -> {
+                val knownHost = _resolvedServerHost.value ?: prefs.getString("last_server_host", null)
+                if (!knownHost.isNullOrBlank()) {
+                    connectClientToHost(knownHost, 8887)
+                }
+                viewModelScope.launch {
+                    delay(350L)
+                    startClientDiscovery()
+                }
+            }
         }
     }
 
@@ -410,10 +424,14 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startClientDiscovery() {
-        _connectionStatus.value = ConnectionStatus.SEARCHING
+        if (_connectionStatus.value != ConnectionStatus.CONNECTED) {
+            _connectionStatus.value = ConnectionStatus.SEARCHING
+        }
         nsdHelper?.startDiscovery { host, port ->
-            _resolvedServerHost.value = host
-            connectClientToHost(host, port)
+            if (_resolvedServerHost.value != host || client?.isOpen != true) {
+                _resolvedServerHost.value = host
+                connectClientToHost(host, port)
+            }
         }
     }
 
@@ -422,6 +440,7 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             client?.close()
             _connectionStatus.value = ConnectionStatus.CONNECTING
             _resolvedServerHost.value = host
+            prefs.edit().putString("last_server_host", host).apply()
 
             val uri = URI("ws://$host:$port")
             client = LocalPosClient(
@@ -459,15 +478,36 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 connect()
             }
 
-            viewModelScope.launch {
+            clientStatusJob?.cancel()
+            clientStatusJob = viewModelScope.launch {
                 client?.connectionStatus?.collect { status ->
                     _connectionStatus.value = status
+                    if ((status == ConnectionStatus.DISCONNECTED || status == ConnectionStatus.ERROR) &&
+                        (_deviceRole.value == DeviceRole.WAITER || _deviceRole.value == DeviceRole.KITCHEN)
+                    ) {
+                        delay(2500L)
+                        val targetHost = _resolvedServerHost.value ?: prefs.getString("last_server_host", null)
+                        if (!targetHost.isNullOrBlank() &&
+                            _connectionStatus.value != ConnectionStatus.CONNECTED &&
+                            _connectionStatus.value != ConnectionStatus.CONNECTING
+                        ) {
+                            connectClientToHost(targetHost, 8887)
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
             Log.e("POSViewModel", "Failed to connect client to $host:$port", e)
             _connectionStatus.value = ConnectionStatus.ERROR
         }
+    }
+
+    fun retryConnection() {
+        val host = _resolvedServerHost.value ?: prefs.getString("last_server_host", null)
+        if (!host.isNullOrBlank()) {
+            connectClientToHost(host, 8887)
+        }
+        initNetworking()
     }
 
     fun switchDeviceRole(newRole: DeviceRole) {
@@ -923,6 +963,9 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun stopNetworking() {
+        clientStatusJob?.cancel()
+        clientStatusJob = null
+
         try {
             server?.stop()
         } catch (_: Exception) {}

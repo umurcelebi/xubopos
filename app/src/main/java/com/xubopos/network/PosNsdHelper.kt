@@ -114,6 +114,13 @@ class PosNsdHelper(private val context: Context) {
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
                 isDiscovering = false
                 Log.e(TAG, "Start discovery failed: $errorCode")
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (!isDiscovering && discoveryListener != null) {
+                        try {
+                            nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+                        } catch (_: Exception) {}
+                    }
+                }, 1200L)
             }
 
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
