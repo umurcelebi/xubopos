@@ -457,6 +457,54 @@ fun TableDetailScreen(
                                         }
                                     }
                                 }
+                            } else if (activeKitchenTickets.any { it.tableId == currentTable.id }) {
+                                Surface(
+                                    color = Slate900,
+                                    shadowElevation = 12.dp,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .navigationBarsPadding()
+                                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                            Text(
+                                                text = "Mutfakta Fiş Bekliyor",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = Amber500
+                                            )
+                                            Text(
+                                                text = "Adisyonda ürün kalmadı",
+                                                fontSize = 11.sp,
+                                                color = Slate400
+                                            )
+                                        }
+                                        Button(
+                                            onClick = { handleSendKitchen() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Rose600),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Clear,
+                                                contentDescription = null,
+                                                tint = PureWhite,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "KDS'den Sil",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = PureWhite
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -1094,25 +1142,93 @@ private fun BillTicketSection(
                         .fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.ShoppingBag,
-                            contentDescription = null,
-                            tint = Slate300,
-                            modifier = Modifier.size(54.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Adisyon henüz boş",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Slate500
-                        )
-                        Text(
-                            text = "Menüden ürünlere dokunarak sipariş ekleyin",
-                            fontSize = 12.sp,
-                            color = Slate400
-                        )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        if (kitchenTickets.isNotEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = Rose50,
+                                border = BorderStroke(1.5.dp, Rose500.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Rose500.copy(alpha = 0.15f),
+                                        modifier = Modifier.size(42.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.Restaurant,
+                                                contentDescription = null,
+                                                tint = Rose600,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = "Mutfakta Açık Fiş Bulunuyor",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Rose600,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Text(
+                                        text = "Adisyondaki tüm ürünler silindi. Mutfak ekranındaki (KDS) fişi iptal edebilirsiniz.",
+                                        fontSize = 11.sp,
+                                        color = Slate600,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Button(
+                                        onClick = onSendKitchen,
+                                        colors = ButtonDefaults.buttonColors(containerColor = Rose600),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = null,
+                                            tint = PureWhite,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "KDS'den Siparişi Sil",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = PureWhite
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.ShoppingBag,
+                                contentDescription = null,
+                                tint = Slate300,
+                                modifier = Modifier.size(54.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Adisyon henüz boş",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate500
+                            )
+                            Text(
+                                text = "Menüden ürünlere dokunarak sipariş ekleyin",
+                                fontSize = 12.sp,
+                                color = Slate400
+                            )
+                        }
                     }
                 }
             } else {
@@ -1394,73 +1510,76 @@ private fun BillTicketSection(
                 }
             }
 
-            if (bill != null && orderItems.isNotEmpty()) {
+            if (bill != null && (orderItems.isNotEmpty() || kitchenTickets.isNotEmpty())) {
                 HorizontalDivider(color = Slate200)
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Ara Toplam", fontSize = 12.sp, color = Slate500)
-                        Text(
-                            text = "₺${"%.2f".format(bill.totalAmount)}",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Slate800
-                        )
-                    }
-                    if (bill.discountAmount > 0) {
+                if (orderItems.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("İndirim", fontSize = 12.sp, color = Rose600)
+                            Text("Ara Toplam", fontSize = 12.sp, color = Slate500)
                             Text(
-                                text = "-₺${"%.2f".format(bill.discountAmount)}",
+                                text = "₺${"%.2f".format(bill.totalAmount)}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Rose600
+                                color = Slate800
                             )
                         }
-                    }
-                    if (bill.paidAmount > 0) {
+                        if (bill.discountAmount > 0) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("İndirim", fontSize = 12.sp, color = Rose600)
+                                Text(
+                                    text = "-₺${"%.2f".format(bill.discountAmount)}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Rose600
+                                )
+                            }
+                        }
+                        if (bill.paidAmount > 0) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Alınan Ara Ödeme", fontSize = 12.sp, color = Emerald700)
+                                Text(
+                                    text = "-₺${"%.2f".format(bill.paidAmount)}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Emerald700
+                                )
+                            }
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Alınan Ara Ödeme", fontSize = 12.sp, color = Emerald700)
                             Text(
-                                text = "-₺${"%.2f".format(bill.paidAmount)}",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Emerald700
+                                text = "KALAN TUTAR",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Slate900
+                            )
+                            Text(
+                                text = "₺${"%.2f".format(bill.remainingAmount)}",
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Amber700
                             )
                         }
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "KALAN TUTAR",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Slate900
-                        )
-                        Text(
-                            text = "₺${"%.2f".format(bill.remainingAmount)}",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Amber700
-                        )
-                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
+                val hasItems = orderItems.isNotEmpty()
                 Button(
                     onClick = onSendKitchen,
                     modifier = Modifier
@@ -1468,20 +1587,25 @@ private fun BillTicketSection(
                         .height(48.dp)
                         .then(if (!isServer) Modifier.navigationBarsPadding() else Modifier),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Amber600),
-                    enabled = orderItems.isNotEmpty()
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (hasItems) Amber600 else Rose600
+                    )
                 ) {
-                    Icon(imageVector = Icons.Default.Restaurant, contentDescription = null, tint = PureWhite)
+                    Icon(
+                        imageVector = if (hasItems) Icons.Default.Restaurant else Icons.Default.Clear,
+                        contentDescription = null,
+                        tint = PureWhite
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "SİPARİŞİ GÖNDER (KDS)",
+                        text = if (hasItems) "SİPARİŞİ GÖNDER (KDS)" else "MUTFAK SİPARİŞİNİ İPTAL ET (KDS)",
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 13.sp,
                         color = PureWhite
                     )
                 }
 
-                if (isServer) {
+                if (isServer && orderItems.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Button(

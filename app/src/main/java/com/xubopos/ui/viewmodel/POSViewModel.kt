@@ -285,13 +285,10 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
         when (_deviceRole.value) {
             DeviceRole.SERVER -> startServer()
             DeviceRole.WAITER, DeviceRole.KITCHEN -> {
+                startClientDiscovery()
                 val knownHost = _resolvedServerHost.value ?: prefs.getString("last_server_host", null)
                 if (!knownHost.isNullOrBlank()) {
                     connectClientToHost(knownHost, 8887)
-                }
-                viewModelScope.launch {
-                    delay(350L)
-                    startClientDiscovery()
                 }
             }
         }
@@ -326,6 +323,12 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                 },
                 onAddOrderReceived = { addOrderPayload ->
                     viewModelScope.launch {
+                        if (addOrderPayload.onlySendKitchen && addOrderPayload.items.isEmpty()) {
+                            repository.deleteKitchenTicketsForTable(addOrderPayload.tableId)
+                            _snackbarMessage.value = "${addOrderPayload.tableName} mutfak siparişi KDS'den kaldırıldı"
+                            return@launch
+                        }
+
                         if (!addOrderPayload.onlySendKitchen) {
                             val menuItemsList = repository.getAllMenuItemsSync()
                             for (item in addOrderPayload.items) {
@@ -473,7 +476,7 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
             _connectionStatus.value = ConnectionStatus.SEARCHING
         }
         nsdHelper?.startDiscovery { host, port ->
-            if (_resolvedServerHost.value != host || client?.isOpen != true) {
+            if (_connectionStatus.value != ConnectionStatus.CONNECTED || _resolvedServerHost.value != host) {
                 _resolvedServerHost.value = host
                 connectClientToHost(host, port)
             }
@@ -543,13 +546,18 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                     if ((status == ConnectionStatus.DISCONNECTED || status == ConnectionStatus.ERROR) &&
                         (_deviceRole.value == DeviceRole.WAITER || _deviceRole.value == DeviceRole.KITCHEN)
                     ) {
-                        delay(2500L)
+                        delay(2000L)
                         val targetHost = _resolvedServerHost.value ?: prefs.getString("last_server_host", null)
                         if (!targetHost.isNullOrBlank() &&
                             _connectionStatus.value != ConnectionStatus.CONNECTED &&
                             _connectionStatus.value != ConnectionStatus.CONNECTING
                         ) {
                             connectClientToHost(targetHost, 8887)
+                        }
+                        if (_connectionStatus.value != ConnectionStatus.CONNECTED &&
+                            _connectionStatus.value != ConnectionStatus.CONNECTING
+                        ) {
+                            startClientDiscovery()
                         }
                     }
                 }
@@ -770,7 +778,41 @@ class POSViewModel(application: Application) : AndroidViewModel(application) {
                     client?.sendAddOrder(payload)
                 }
                 _snackbarMessage.value = "${table.name} siparişi mutfak ekranına iletildi!"
+            } else {
+                // Masada hiç ürün kalmadıysa KDS'deki açık fişi iptal et / sil
+                if (_deviceRole.value == DeviceRole.SERVER) {
+                    repository.deleteKitchenTicketsForTable(table.id)
+                } else {
+                    val payload = AddOrderPayload(
+                        tableId = table.id,
+                        tableName = table.name,
+                        waiterName = "Garson",
+                        items = emptyList(),
+                        onlySendKitchen = true
+                    )
+                    client?.sendAddOrder(payload)
+                }
+                _snackbarMessage.value = "${table.name} mutfak siparişi KDS'den kaldırıldı!"
             }
+        }
+    }
+
+    fun cancelKitchenTicketForTable(tableId: Int) {
+        val table = allTables.value.find { it.id == tableId } ?: return
+        viewModelScope.launch {
+            if (_deviceRole.value == DeviceRole.SERVER) {
+                repository.deleteKitchenTicketsForTable(tableId)
+            } else {
+                val payload = AddOrderPayload(
+                    tableId = tableId,
+                    tableName = table.name,
+                    waiterName = "Garson",
+                    items = emptyList(),
+                    onlySendKitchen = true
+                )
+                client?.sendAddOrder(payload)
+            }
+            _snackbarMessage.value = "${table.name} mutfak siparişi KDS'den kaldırıldı!"
         }
     }
 

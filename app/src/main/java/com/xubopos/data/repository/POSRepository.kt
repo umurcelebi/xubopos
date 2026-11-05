@@ -655,7 +655,11 @@ class POSRepository(private val dao: RestaurantDao) {
         tableName: String,
         waiterName: String,
         items: List<KitchenTicketItemDto>
-    ): KitchenTicketEntity {
+    ): KitchenTicketEntity? {
+        if (items.isEmpty()) {
+            dao.deleteKitchenTicketsForTable(tableId)
+            return null
+        }
         val existingTickets = dao.getActiveKitchenTicketsForTable(tableId)
         val currentTime = System.currentTimeMillis()
 
@@ -751,24 +755,36 @@ class POSRepository(private val dao: RestaurantDao) {
         val bill = dao.getBillById(billId) ?: return
         val table = dao.getTableById(tableId) ?: return
 
-        if (items.isEmpty() && bill.paidAmount <= 0.0) {
-            dao.updateBill(
-                bill.copy(
-                    totalAmount = 0.0,
-                    status = "CANCELLED",
-                    closedAt = System.currentTimeMillis()
+        if (items.isEmpty()) {
+            dao.deleteKitchenTicketsForTable(tableId)
+            if (bill.paidAmount <= 0.0) {
+                dao.updateBill(
+                    bill.copy(
+                        totalAmount = 0.0,
+                        status = "CANCELLED",
+                        closedAt = System.currentTimeMillis()
+                    )
                 )
-            )
-            dao.updateTable(
-                table.copy(
-                    isOccupied = false,
-                    currentBillId = null,
-                    occupiedSince = null,
-                    currentTotalAmount = 0.0,
-                    currentPaidAmount = 0.0
+                dao.updateTable(
+                    table.copy(
+                        isOccupied = false,
+                        currentBillId = null,
+                        occupiedSince = null,
+                        currentTotalAmount = 0.0,
+                        currentPaidAmount = 0.0
+                    )
                 )
-            )
-            return
+                return
+            } else {
+                dao.updateBill(bill.copy(totalAmount = 0.0))
+                dao.updateTable(
+                    table.copy(
+                        currentTotalAmount = 0.0,
+                        currentPaidAmount = bill.paidAmount
+                    )
+                )
+                return
+            }
         }
 
         val rawTotal = items.sumOf { it.subtotal }
